@@ -169,7 +169,6 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         """
             This is called when we actually want to send a reply
         """
-        await ctx.trigger_typing()
         checkvote = await self.check_vote(message.author.id)
         if checkvote is None:
             return
@@ -178,6 +177,7 @@ class Cleverbot(CleverbotAPI, commands.Cog):
                 f"{author.mention} You can only talk with me if you upvote me on Top.gg. "
                 f"The fastest way to do that is by using `{ctx.prefix or ''}daily` command."
             )
+        await ctx.trigger_typing()
         try:
             response = await self.get_response(author, message)
         except NoCredentials:
