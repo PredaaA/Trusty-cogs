@@ -158,7 +158,7 @@ class Cleverbot(CleverbotAPI, commands.Cog):
     async def check_vote(self, user: int):
         cog = self.bot.get_cog("DblTools")
         if not cog:
-            return True
+            return None
         if await cog.config.user_from_id(user).voted():
             return True
         return False
@@ -170,7 +170,10 @@ class Cleverbot(CleverbotAPI, commands.Cog):
             This is called when we actually want to send a reply
         """
         await ctx.trigger_typing()
-        if not await self.check_vote(message.author.id):
+        checkvote = await self.check_vote(message.author.id)
+        if checkvote is None:
+            return
+        if checkvote is False:
             return await ctx.send(
                 f"{author.mention} You can only talk with me if you upvote me on Top.gg. "
                 f"The fastest way to do that is by using `{ctx.prefix or ''}daily` command."
