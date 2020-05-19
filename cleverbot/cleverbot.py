@@ -169,7 +169,7 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         """
             This is called when we actually want to send a reply
         """
-        checkvote = await self.check_vote(message.author.id)
+        checkvote = await self.check_vote(author.id)
         if checkvote is None:
             return
         if checkvote is False:
