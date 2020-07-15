@@ -5,7 +5,7 @@
     ],
     "bot_version" : [
         3,
-        0,
+        8,
         0
     ],
     "description" : "Allows for interaction with cleverbot.com through mention/command",
@@ -18,10 +18,6 @@
         2
     ],
     "name" : "Cleverbot",
-    "permissions" : [],
-    "required_cogs" : [],
-    "requirements" : [],
     "short" : "Talk with Cleverbot!",
-    "tags" : [],
     "type" : "COG"
 }
