@@ -30,16 +30,17 @@ class Cleverbot(CleverbotAPI, commands.Cog):
     """
 
     __author__ = ["Twentysix", "TrustyJAID"]
-    __version__ = "2.1.1_brandjuh"
+    __version__ = "2.1.2_brandjuh"
 
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, 127486454786)
         default_global = {"api": None, "io_user": None, "io_key": None, "allow_dm": False}
-        default_guild = {"channel": None, "toggle": False, "mention": False}
+        default_guild = {"channels": [], "toggle": False, "mention": False}
         self.config.register_global(**default_global)
         self.config.register_guild(**default_guild)
         self.instances = {}
+        self.init_task = self.bot.loop.create_task(self._convert_data())
 
     def format_help_for_context(self, ctx: commands.Context):
         """
@@ -47,6 +48,15 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         """
         pre_processed = super().format_help_for_context(ctx)
         return f"{pre_processed}\n\nCog Version: {self.__version__}"
+
+    async def _convert_data(self):
+        config = await self.config.all_guilds()
+        for guild_id, guild_data in config.items():
+            for k, v in guild_data.items():
+                if k == "channel":
+                    async with self.config.guild_from_id(guild_id).all() as guild_config:
+                        guild_config["channels"].append(v)
+                        del guild_config["channel"]
 
     @commands.command()
     async def cleverbot(self, ctx: commands.Context, *, message: str) -> None:
@@ -109,20 +119,18 @@ class Cleverbot(CleverbotAPI, commands.Cog):
 
             do `[p]cleverbot channel` after a channel is set to disable.
         """
-        guild = ctx.message.guild
-        cur_auto_channel = await self.config.guild(guild).channel()
-        if not cur_auto_channel:
-            if channel is None:
-                channel = ctx.message.channel
-            await self.config.guild(guild).channel.set(channel.id)
+        if not channel:
+            channel = ctx.channel
+        async with self.config.guild(ctx.guild).all() as config:
+            if channel.id in config["channels"]:
+                config["channels"].remove(channel.id)
+                return await ctx.send(_("Automatic replies for this channel turned off."))
+            config["channels"].append(channel.id)
             await ctx.send(
-                _("I will automaticall reply to all messages in {channel}").format(
+                _("I will automatically reply to all messages in {channel}.").format(
                     channel=channel.mention
                 )
             )
-        else:
-            await self.config.guild(guild).channel.set(None)
-            await ctx.send(_("Automatic replies turned off."))
 
     @cleverbotset.command()
     @checks.is_owner()
