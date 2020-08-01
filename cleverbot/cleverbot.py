@@ -226,7 +226,7 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         is_mention = re.findall(to_strip, msg)
         if message.author.id != self.bot.user.id:
 
-            if not is_mention and message.channel.id != await self.config.guild(guild).channel():
+            if not is_mention and message.channel.id not in await self.config.guild(guild).channels():
                 return
             if not await self.config.guild(guild).toggle():
                 return
