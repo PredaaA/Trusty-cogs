@@ -32,6 +32,10 @@ class Cleverbot(CleverbotAPI, commands.Cog):
     __author__ = ["Twentysix", "TrustyJAID"]
     __version__ = "2.1.2_brandjuh"
 
+    async def red_delete_data_for_user(self, **kwargs):
+        """Nothing to delete."""
+        return
+
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, 127486454786)

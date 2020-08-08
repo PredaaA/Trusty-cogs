@@ -1,23 +1,13 @@
 {
-    "author" : [
-        "Twentysix",
-        "TrustyJAID"
-    ],
-    "bot_version" : [
-        3,
-        8,
-        0
-    ],
-    "description" : "Allows for interaction with cleverbot.com through mention/command",
-    "disabled" : false,
-    "hidden" : false,
-    "install_msg" : "Needs to be setup with an API key first. See `[p]cleverbotset apikey` / `[p]cleverbotset ioapikey`\n[p]cleverbot <text>` to talk with cleverbot.\n`@Mention <text>` works too.\n`[p]cleverbotset toggle` toggles replies by mention.",
-    "min_python_version" : [
-        3,
-        6,
-        2
-    ],
-    "name" : "Cleverbot",
-    "short" : "Talk with Cleverbot!",
-    "type" : "COG"
+  "author": ["Twentysix", "TrustyJAID"],
+  "bot_version": [3, 8, 0],
+  "description": "Allows for interaction with cleverbot.com through mention/command",
+  "disabled": false,
+  "hidden": false,
+  "install_msg": "Needs to be setup with an API key first. See `[p]cleverbotset apikey` / `[p]cleverbotset ioapikey`\n[p]cleverbot <text>` to talk with cleverbot.\n`@Mention <text>` works too.\n`[p]cleverbotset toggle` toggles replies by mention.",
+  "min_python_version": [3, 6, 2],
+  "name": "Cleverbot",
+  "short": "Talk with Cleverbot!",
+  "type": "COG",
+  "end_user_data_statement": "This cog does not persistently store data or metadata about users."
 }
