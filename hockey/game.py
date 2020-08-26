@@ -3,6 +3,7 @@ import aiohttp
 import asyncio
 import logging
 
+from typing import Optional
 from datetime import datetime
 
 from redbot.core import Config
@@ -20,6 +21,8 @@ _ = Translator("Hockey", __file__)
 
 log = logging.getLogger("red.trusty-cogs.Hockey")
 
+GAME_TYPES = {"PR": _("Pre Season"), "R": _("Regular Season"), "P": _("Post Season")}
+
 
 class Game:
     """
@@ -27,49 +30,51 @@ class Game:
         game state updates and goal posts
     """
 
-    def __init__(
-        self,
-        game_state: str,
-        home_team: str,
-        away_team: str,
-        period: int,
-        home_shots: int,
-        away_shots: int,
-        home_score: int,
-        away_score: int,
-        game_start: str,
-        goals: list,
-        home_goals: list,
-        away_goals: list,
-        home_abr: str,
-        away_abr: str,
-        period_ord: str,
-        period_time_left: str,
-        plays: list,
-        first_star: str,
-        second_star: str,
-        third_star: str,
-        players: dict = None,
-        link: str = None,
-    ):
+    game_state: str
+    home_team: str
+    away_team: str
+    period: int
+    home_shots: int
+    away_shots: int
+    home_score: int
+    away_score: int
+    game_start: datetime
+    goals: list
+    home_goals: list
+    away_goals: list
+    home_abr: str
+    away_abr: str
+    period_ord: str
+    period_time_left: str
+    plays: list
+    first_star: Optional[str]
+    second_star: Optional[str]
+    third_star: Optional[str]
+    away_roster: Optional[dict]
+    home_roster: Optional[dict]
+    link: Optional[str]
+
+    def __init__(self, **kwargs):
         super().__init__()
-        self.game_state = game_state
-        self.home_team = home_team
-        self.away_team = away_team
-        self.home_shots = home_shots
-        self.away_shots = away_shots
-        self.home_score = home_score
-        self.away_score = away_score
-        self.goals = goals
-        self.home_goals = home_goals
-        self.away_goals = away_goals
-        self.home_abr = home_abr
-        self.away_abr = away_abr
-        self.period = period
-        self.period_ord = period_ord
-        self.period_time_left = period_time_left
-        self.plays = plays
-        self.game_start = datetime.strptime(game_start, "%Y-%m-%dT%H:%M:%SZ")
+        self.game_state = kwargs.get("game_state")
+        self.home_team = kwargs.get("home_team")
+        self.away_team = kwargs.get("away_team")
+        self.home_shots = kwargs.get("home_shots")
+        self.away_shots = kwargs.get("away_shots")
+        self.home_score = kwargs.get("home_score")
+        self.away_score = kwargs.get("away_score")
+        self.goals = kwargs.get("goals")
+        self.home_goals = kwargs.get("home_goals")
+        self.away_goals = kwargs.get("away_goals")
+        self.home_abr = kwargs.get("home_abr")
+        self.away_abr = kwargs.get("away_abr")
+        self.period = kwargs.get("period")
+        self.period_ord = kwargs.get("period_ord")
+        self.period_time_left = kwargs.get("period_time_left")
+        self.plays = kwargs.get("plays")
+        self.game_start = datetime.strptime(kwargs.get("game_start"), "%Y-%m-%dT%H:%M:%SZ")
+        home_team = kwargs.get("home_team")
+        away_team = kwargs.get("away_team")
         self.home_logo = (
             TEAMS[home_team]["logo"]
             if home_team in TEAMS
@@ -83,18 +88,20 @@ class Game:
         self.home_emoji = (
             "<:{}>".format(TEAMS[home_team]["emoji"])
             if home_team in TEAMS
-            else "<:nhl:496510372828807178>"
+            else "\N{HOUSE BUILDING}\N{VARIATION SELECTOR-16}"
         )
         self.away_emoji = (
             "<:{}>".format(TEAMS[away_team]["emoji"])
             if away_team in TEAMS
-            else "<:nhl:496510372828807178>"
+            else "\N{AIRPLANE}\N{VARIATION SELECTOR-16}"
         )
-        self.first_star = first_star
-        self.second_star = second_star
-        self.third_star = third_star
-        self.players = players
-        self.link = link
+        self.first_star = kwargs.get("first_star")
+        self.second_star = kwargs.get("second_star")
+        self.third_star = kwargs.get("third_star")
+        self.away_roster = kwargs.get("away_roster")
+        self.home_roster = kwargs.get("home_roster")
+        self.game_type = kwargs.get("game_type")
+        self.link = kwargs.get("link")
 
     def to_json(self) -> dict:
         return {
@@ -122,7 +129,8 @@ class Game:
             "first_star": self.first_star,
             "second_star": self.second_star,
             "third_star": self.third_star,
-            "link": self.link
+            "game_type": {v: k for k, v in GAME_TYPES.items()}.get(self.game_type, ""),
+            "link": self.link,
         }
 
     @staticmethod
@@ -150,19 +158,6 @@ class Game:
                     log.error("Error grabbing game data:", exc_info=True)
                     continue
         return return_games_list
-
-    @staticmethod
-    async def get_game_from_link(url: str):
-        """
-            Returns a game object from a provided link
-        """
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                data = await resp.json()
-            if "message" in data:
-                return data["message"]
-        game = await Game.from_json(data)
-        return game
 
     @staticmethod
     async def get_games_list(team=None, start_date: datetime = None, end_date: datetime = None):
@@ -217,7 +212,7 @@ class Game:
 
         return await data.make_game_embed()
 
-    async def make_game_embed(self):
+    async def make_game_embed(self, include_plays: bool = False):
         """
             Builds the game embed when the command is called
             provides as much data as possible
@@ -240,15 +235,19 @@ class Game:
             em.colour = colour
         em.set_author(name=title, url=team_url, icon_url=self.home_logo)
         em.set_thumbnail(url=self.home_logo)
-        em.set_footer(text=_("Game start "), icon_url=self.away_logo)
+        em.set_footer(
+            text=_("{game_type} Game start ").format(game_type=self.game_type),
+            icon_url=self.away_logo,
+        )
         if self.game_state == "Preview":
             home_str, away_str = await self.get_stats_msg()
             em.add_field(
-                name=f"{self.home_emoji} {self.home_team} {self.home_emoji}", value=home_str
-            )
-            em.add_field(
                 name=f"{self.away_emoji} {self.away_team} {self.away_emoji}", value=away_str
             )
+            em.add_field(
+                name=f"{self.home_emoji} {self.home_team} {self.home_emoji}", value=home_str
+            )
+
         if self.game_state != "Preview":
             home_msg = (
                 _("Goals: **")
@@ -265,11 +264,12 @@ class Game:
                 + "**"
             )
             em.add_field(
-                name=f"{self.home_emoji} {self.home_team} {self.home_emoji}", value=home_msg
-            )
-            em.add_field(
                 name=f"{self.away_emoji} {self.away_team} {self.away_emoji}", value=away_msg
             )
+            em.add_field(
+                name=f"{self.home_emoji} {self.home_team} {self.home_emoji}", value=home_msg
+            )
+
             if self.goals != []:
                 goal_msg = ""
                 first_goals = [goal for goal in self.goals if goal.period_ord == "1st"]
@@ -290,7 +290,7 @@ class Game:
                     for goal in list_goals[ordinal]:
                         if count == 5:
                             em.add_field(
-                                name=str(ordinal) + _(" Period Goals"), value=goal_msg[:1024]
+                                name=str(ordinal) + _(" Period Goals"), value=goal_msg[:1024], inline=False
                             )
                             count = 0
                             goal_msg = ""
@@ -306,14 +306,14 @@ class Game:
                             value=goal_msg[:1024],
                         )
                     if len(list_goals[ordinal]) <= 5 and goal_msg != "":
-                        em.add_field(name=str(ordinal) + _(" Period Goals"), value=goal_msg[:1024])
+                        em.add_field(name=str(ordinal) + _(" Period Goals"), value=goal_msg[:1024], inline=False)
                 if len(so_goals) != 0:
                     home_msg, away_msg = await self.goals[0].get_shootout_display(self)
                     em.add_field(name=f"{self.home_team}" + _(" Shootout"), value=home_msg)
                     em.add_field(name=f"{self.away_team}" + _(" Shootout"), value=away_msg)
             if self.first_star is not None:
                 stars = f"⭐ {self.first_star}\n⭐⭐ {self.second_star}\n⭐⭐⭐ {self.third_star}"
-                em.add_field(name=_("Stars of the game"), value=stars)
+                em.add_field(name=_("Stars of the game"), value=stars, inline=False)
             if self.game_state == "Live":
                 period = self.period_ord
                 if self.period_time_left[0].isdigit():
@@ -330,6 +330,8 @@ class Game:
                         + str(period)
                         + _(" period")
                     )
+                if include_plays:
+                    em.description = self.plays[-1]["result"]["description"]
                 em.add_field(name="Period", value=msg)
         return em
 
@@ -360,7 +362,7 @@ class Game:
             )
         else:
             home_str, away_str = await self.get_stats_msg()
-        em.add_field(name=home_field, value=home_str, inline=True)
+        em.add_field(name=home_field, value=home_str, inline=False)
         em.add_field(name=away_field, value=away_str, inline=True)
         colour = (
             int(TEAMS[self.home_team]["home"].replace("#", ""), 16)
@@ -481,16 +483,22 @@ class Game:
 
         if self.game_state == "Final" and (self.first_star is not None or count >= 10):
             """Final game state checks"""
+
             if (self.home_score + self.away_score) != 0:
-                """ Check for goal before posting game final, happens with OT games"""
+                # Check for goal before posting game final, happens with OT games
                 await self.check_team_goals(bot)
+                log.debug("Checking team goals for the last time")
+
             if home["game_state"] != self.game_state and home["game_state"] != "Null":
+
                 # Post game final data and check for next game
-                msg = "Game Final {} @ {}"
-                log.debug(msg.format(self.home_team, self.away_team))
+                log.debug(f"Game Final {self.home_team} @ {self.away_team}")
                 await self.post_game_state(bot)
                 await self.save_game_state(bot)
                 bot.dispatch("hockey_final", self)
+                log.debug("Saving final")
+                return True
+        return False
 
     async def post_game_state(self, bot):
         """
@@ -529,6 +537,7 @@ class Game:
         config = bot.get_cog("Hockey").config
         game_day_channels = await config.guild(guild).gdc()
         can_embed = channel.permissions_for(guild.me).embed_links
+        publish_states = await config.channel(channel).publish_states()
         # can_manage_webhooks = False  # channel.permissions_for(guild.me).manage_webhooks
 
         if self.game_state == "Live":
@@ -561,9 +570,16 @@ class Game:
             )
             try:
                 if not can_embed:
-                    await channel.send(msg + "\n{}".format(state_text), **allowed_mentions)
+                    msg = await channel.send(msg + "\n{}".format(state_text), **allowed_mentions)
                 else:
-                    await channel.send(msg, embed=state_embed, **allowed_mentions)
+                    msg = await channel.send(msg, embed=state_embed, **allowed_mentions)
+                if self.game_state in publish_states:
+                    try:
+                        if channel.is_news():
+                            # allows backwards compatibility still
+                            await msg.publish()
+                    except Exception:
+                        pass
             except Exception:
                 log.error(
                     _("Could not post goal in {channel} ({id})").format(
@@ -583,6 +599,14 @@ class Game:
                     preview_msg = await channel.send(state_text)
                 else:
                     preview_msg = await channel.send(embed=state_embed)
+
+                if self.game_state in publish_states:
+                    try:
+                        if channel.is_news():
+                            # allows backwards compatibility still
+                            await preview_msg.publish()
+                    except Exception:
+                        pass
 
                 # Create new pickems object for the game
                 if self.game_state == "Preview":
@@ -740,8 +764,11 @@ class Game:
         event = data["liveData"]["plays"]["allPlays"]
         home_team = data["gameData"]["teams"]["home"]["name"]
         away_team = data["gameData"]["teams"]["away"]["name"]
-        players = data["liveData"]["boxscore"]["teams"]["away"]["players"]
-        players.update(data["liveData"]["boxscore"]["teams"]["home"]["players"])
+        away_roster = data["liveData"]["boxscore"]["teams"]["away"]["players"]
+        home_roster = data["liveData"]["boxscore"]["teams"]["home"]["players"]
+        players = {}
+        players.update(away_roster)
+        players.update(home_roster)
         goals = [
             await Goal.from_json(goal, players)
             for goal in event
@@ -764,28 +791,30 @@ class Game:
         first_star = decisions["firstStar"]["fullName"] if "firstStar" in decisions else None
         second_star = decisions["secondStar"]["fullName"] if "secondStar" in decisions else None
         third_star = decisions["thirdStar"]["fullName"] if "thirdStar" in decisions else None
-
+        game_type = GAME_TYPES.get(data["gameData"]["game"]["type"], _("Unknown"))
         return cls(
-            data["gameData"]["status"]["abstractGameState"],
-            data["gameData"]["teams"]["home"]["name"],
-            data["gameData"]["teams"]["away"]["name"],
-            data["liveData"]["linescore"]["currentPeriod"],
-            data["liveData"]["linescore"]["teams"]["home"]["shotsOnGoal"],
-            data["liveData"]["linescore"]["teams"]["away"]["shotsOnGoal"],
-            data["liveData"]["linescore"]["teams"]["home"]["goals"],
-            data["liveData"]["linescore"]["teams"]["away"]["goals"],
-            data["gameData"]["datetime"]["dateTime"],
-            goals,
-            [goal for goal in goals if home_team in goal.team_name],
-            [goal for goal in goals if away_team in goal.team_name],
-            data["gameData"]["teams"]["home"]["abbreviation"],
-            data["gameData"]["teams"]["away"]["abbreviation"],
-            period_ord,
-            period_time_left,
-            events,
-            first_star,
-            second_star,
-            third_star,
-            players,
-            link,
+            game_state=data["gameData"]["status"]["abstractGameState"],
+            home_team=data["gameData"]["teams"]["home"]["name"],
+            away_team=data["gameData"]["teams"]["away"]["name"],
+            period=data["liveData"]["linescore"]["currentPeriod"],
+            home_shots=data["liveData"]["linescore"]["teams"]["home"]["shotsOnGoal"],
+            away_shots=data["liveData"]["linescore"]["teams"]["away"]["shotsOnGoal"],
+            home_score=data["liveData"]["linescore"]["teams"]["home"]["goals"],
+            away_score=data["liveData"]["linescore"]["teams"]["away"]["goals"],
+            game_start=data["gameData"]["datetime"]["dateTime"],
+            goals=goals,
+            home_goals=[goal for goal in goals if home_team in goal.team_name],
+            away_goals=[goal for goal in goals if away_team in goal.team_name],
+            home_abr=data["gameData"]["teams"]["home"]["abbreviation"],
+            away_abr=data["gameData"]["teams"]["away"]["abbreviation"],
+            period_ord=period_ord,
+            period_time_left=period_time_left,
+            plays=events,
+            first_star=first_star,
+            second_star=second_star,
+            third_star=third_star,
+            away_roster=away_roster,
+            home_roster=home_roster,
+            link=link,
+            game_type=game_type,
         )
