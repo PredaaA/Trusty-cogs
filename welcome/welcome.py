@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from redbot.core import commands, Config, checks, VersionInfo, version_info
-from redbot.core.utils.chat_formatting import pagify
+from redbot.core.utils.chat_formatting import pagify, humanize_list
 from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils.predicates import MessagePredicate
 
@@ -37,6 +37,8 @@ default_settings = {
     "LAST_GREETING": None,
     "FILTER_SETTING": None,
     "LAST_GOODBYE": None,
+    "MENTIONS": {"users": True, "roles": False, "everyone": False},
+    "GOODBYE_MENTIONS": {"users": True, "roles": False, "everyone": False},
     "EMBED_DATA": {
         "title": None,
         "colour": 0,
@@ -60,11 +62,11 @@ log = logging.getLogger("red.trusty-cogs.Welcome")
 @cog_i18n(_)
 class Welcome(Events, commands.Cog):
     """Welcomes new members and goodbye those who leave to the guild
-     in the default channel rewritten for V3 from
-     https://github.com/irdumbs/Dumb-Cogs/blob/master/welcome/welcome.py"""
+    in the default channel rewritten for V3 from
+    https://github.com/irdumbs/Dumb-Cogs/blob/master/welcome/welcome.py"""
 
     __author__ = ["irdumb", "TrustyJAID"]
-    __version__ = "2.3.0"
+    __version__ = "2.4.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -76,14 +78,14 @@ class Welcome(Events, commands.Cog):
 
     def format_help_for_context(self, ctx: commands.Context) -> str:
         """
-            Thanks Sinbad!
+        Thanks Sinbad!
         """
         pre_processed = super().format_help_for_context(ctx)
         return f"{pre_processed}\n\nCog Version: {self.__version__}"
 
     async def red_delete_data_for_user(self, **kwargs):
         """
-            Nothing to delete
+        Nothing to delete
         """
         return
 
@@ -168,14 +170,54 @@ class Welcome(Events, commands.Cog):
     @welcomeset.group(name="greeting", aliases=["welcome"])
     async def welcomeset_greeting(self, ctx: commands.Context) -> None:
         """
-            Manage welcome messages
+        Manage welcome messages
         """
         pass
+
+    @welcomeset_greeting.command()
+    @checks.mod_or_permissions(mention_everyone=True)
+    @checks.bot_has_permissions(mention_everyone=True)
+    async def allowedmentions(self, ctx: commands.Context, set_to: bool, *allowed) -> None:
+        """
+        Determine the bots allowed mentions for welcomes
+
+        `<set_to>` What to set the allowed mentions to either `True` or `False`.
+        `[allowed...]` must be either `everyone`, `users`, or `roles` and can include more than one.
+
+        Note: This will only function on Red 3.4.0 or higher.
+        """
+        if not allowed:
+            return await ctx.send(_("You must provide either `users`, `roles` or `everyone`."))
+        for i in set(allowed):
+            if i not in ["everyone", "users", "roles"]:
+                return await ctx.send(_("You must provide either `users`, `roles` or `everyone`."))
+        if (
+            "everyone" in set(allowed)
+            or "roles" in set(allowed)
+            and not ctx.guild.me.guild_permissions.mention_everyone
+        ):
+            await ctx.send(
+                _(
+                    "I don't have mention everyone permissions so these settings may not work properly."
+                )
+            )
+        async with self.config.guild(ctx.guild).MENTIONS() as mention_settings:
+            for setting in set(allowed):
+                mention_settings[setting] = set_to
+        await ctx.send(
+            _("Mention settings have been set to {set_to} for {settings}").format(
+                set_to=str(set_to), settings=humanize_list(list(set(allowed)))
+            )
+        )
 
     @welcomeset_greeting.command(name="grouped")
     async def welcomeset_greeting_grouped(self, ctx: commands.Context, grouped: bool) -> None:
         """Set whether to group welcome messages"""
         await self.config.guild(ctx.guild).GROUPED.set(grouped)
+        if grouped:
+            await ctx.send(_("I will now group welcomes."))
+        else:
+            await ctx.send(_("I will no longer group welcomes."))
 
     @welcomeset_greeting.command(name="add")
     async def welcomeset_greeting_add(self, ctx: commands.Context, *, format_msg: str) -> None:
@@ -201,8 +243,7 @@ class Welcome(Events, commands.Cog):
 
     @welcomeset_greeting.command(name="del")
     async def welcomeset_greeting_del(self, ctx: commands.Context) -> None:
-        """Removes a welcome message from the random message list
-        """
+        """Removes a welcome message from the random message list"""
         guild = ctx.message.guild
         guild_settings = await self.config.guild(guild).GREETING()
         msg = _("Choose a welcome message to delete:\n\n")
@@ -228,7 +269,7 @@ class Welcome(Events, commands.Cog):
     @welcomeset_greeting.command(name="list")
     async def welcomeset_greeting_list(self, ctx: commands.Context) -> None:
         """
-            Lists the welcome messages of this guild
+        Lists the welcome messages of this guild
         """
         guild = ctx.message.guild
         msg = _("Welcome messages:\n\n")
@@ -241,7 +282,7 @@ class Welcome(Events, commands.Cog):
     @welcomeset_greeting.command(name="toggle")
     async def welcomeset_greeting_toggle(self, ctx: commands.Context) -> None:
         """
-            Turns on/off welcoming new users to the guild
+        Turns on/off welcoming new users to the guild
         """
         guild = ctx.message.guild
         guild_settings = await self.config.guild(guild).ON()
@@ -255,7 +296,7 @@ class Welcome(Events, commands.Cog):
     @welcomeset_greeting.command(name="deleteprevious")
     async def welcomeset_greeting_delete_previous(self, ctx: commands.Context) -> None:
         """
-            Turns on/off deleting the previous welcome message when a user joins
+        Turns on/off deleting the previous welcome message when a user joins
         """
         guild = ctx.message.guild
         guild_settings = await self.config.guild(guild).DELETE_PREVIOUS_GREETING()
@@ -273,9 +314,9 @@ class Welcome(Events, commands.Cog):
     @welcomeset_greeting.command(name="count")
     async def welcomeset_greeting_count(self, ctx: commands.Context) -> None:
         """
-            Turns on/off showing how many users join each day.
+        Turns on/off showing how many users join each day.
 
-            This resets 24 hours after the cog was loaded.
+        This resets 24 hours after the cog was loaded.
         """
         guild = ctx.message.guild
         guild_settings = await self.config.guild(guild).JOINED_TODAY()
@@ -289,26 +330,28 @@ class Welcome(Events, commands.Cog):
     @welcomeset_greeting.command(name="minimumage", aliases=["age"])
     async def welcomeset_greeting_minimum_days(self, ctx: commands.Context, days: int) -> None:
         """
-            Set the minimum number of days a user account must be to show up in the welcome message
+        Set the minimum number of days a user account must be to show up in the welcome message
 
-            `<days>` number of days old the account must be, set to 0 to not require this.
+        `<days>` number of days old the account must be, set to 0 to not require this.
         """
         guild = ctx.message.guild
         if days < 0:
             days = 0
         await self.config.guild(guild).MINIMUM_DAYS.set(days)
-        await ctx.send(_("I will now show users joining who are {days} days old.").format(days=days))
+        await ctx.send(
+            _("I will now show users joining who are {days} days old.").format(days=days)
+        )
 
     @welcomeset_greeting.command(name="filter")
     async def welcomeset_greeting_filter(
         self, ctx: commands.Context, replacement: Optional[str] = None
     ) -> None:
         """
-            Set what to do when a username matches the bots filter.
+        Set what to do when a username matches the bots filter.
 
-            `[replacement]` replaces usernames that are found by cores filter with this word.
+        `[replacement]` replaces usernames that are found by cores filter with this word.
 
-            If left blank, this will prevent welcome messages for usernames matching cores filter.
+        If left blank, this will prevent welcome messages for usernames matching cores filter.
 
         """
 
@@ -316,9 +359,9 @@ class Welcome(Events, commands.Cog):
         has_filter = self.bot.get_cog("Filter")
         if replacement:
             await ctx.send(
-                _("I will now replace usernames matching cores filter with `{replacement}`").format(
-                    replacement=replacement
-                )
+                _(
+                    "I will now replace usernames matching cores filter with `{replacement}`"
+                ).format(replacement=replacement)
             )
             if not has_filter:
                 await ctx.send(
@@ -344,9 +387,9 @@ class Welcome(Events, commands.Cog):
         self, ctx: commands.Context, delete_after: Optional[int] = None
     ) -> None:
         """
-            Set the time after which a welcome message is deleted in seconds.
+        Set the time after which a welcome message is deleted in seconds.
 
-            Providing no input will set the bot to not delete after any time.
+        Providing no input will set the bot to not delete after any time.
         """
         if delete_after:
             await ctx.send(
@@ -390,9 +433,44 @@ class Welcome(Events, commands.Cog):
     @welcomeset.group(name="goodbye", aliases=["leave"])
     async def welcomeset_goodbye(self, ctx: commands.Context) -> None:
         """
-            Manage goodbye messages
+        Manage goodbye messages
         """
         pass
+
+    @welcomeset_goodbye.command(name="allowedmentions")
+    @checks.mod_or_permissions(mention_everyone=True)
+    async def goodbye_allowedmentions(self, ctx: commands.Context, set_to: bool, *allowed) -> None:
+        """
+        Determine the bots allowed mentions for welcomes
+
+        `<set_to>` What to set the allowed mentions to either `True` or `False`.
+        `[allowed...]` must be either `everyone`, `users`, or `roles` and can include more than one.
+
+        Note: This will only function on Red 3.4.0 or higher.
+        """
+        if not allowed:
+            return await ctx.send(_("You must provide either `users`, `roles` or `everyone`."))
+        for i in set(allowed):
+            if i not in ["everyone", "users", "roles"]:
+                return await ctx.send(_("You must provide either `users`, `roles` or `everyone`."))
+        if (
+            "everyone" in set(allowed)
+            or "roles" in set(allowed)
+            and not ctx.guild.me.guild_permissions.mention_everyone
+        ):
+            await ctx.send(
+                _(
+                    "I don't have mention everyone permissions so these settings may not work properly."
+                )
+            )
+        async with self.config.guild(ctx.guild).GOODBYE_MENTIONS() as mention_settings:
+            for setting in set(allowed):
+                mention_settings[setting] = set_to
+        await ctx.send(
+            _("Mention settings have been set to {set_to} for {settings}").format(
+                set_to=str(set_to), settings=humanize_list(list(set(allowed)))
+            )
+        )
 
     @welcomeset_goodbye.command(name="add")
     async def welcomeset_goodbye_add(self, ctx: commands.Context, *, format_msg: str) -> None:
@@ -445,7 +523,7 @@ class Welcome(Events, commands.Cog):
     @welcomeset_goodbye.command(name="list")
     async def welcomeset_goodbye_list(self, ctx: commands.Context) -> None:
         """
-            Lists the goodbye messages of this guild
+        Lists the goodbye messages of this guild
         """
         guild = ctx.message.guild
         msg = _("Goodbye messages:\n\n")
@@ -458,7 +536,7 @@ class Welcome(Events, commands.Cog):
     @welcomeset_goodbye.command(name="toggle")
     async def welcomeset_goodbye_toggle(self, ctx: commands.Context) -> None:
         """
-            Turns on/off goodbying users who leave to the guild
+        Turns on/off goodbying users who leave to the guild
         """
         guild = ctx.message.guild
         guild_settings = await self.config.guild(guild).LEAVE_ON()
@@ -490,7 +568,7 @@ class Welcome(Events, commands.Cog):
     @welcomeset_goodbye.command(name="deleteprevious")
     async def welcomeset_goodbye_delete_previous(self, ctx: commands.Context) -> None:
         """
-            Turns on/off deleting the previous welcome message when a user joins
+        Turns on/off deleting the previous welcome message when a user joins
         """
         guild = ctx.message.guild
         guild_settings = await self.config.guild(guild).DELETE_PREVIOUS_GOODBYE()
@@ -508,9 +586,9 @@ class Welcome(Events, commands.Cog):
         self, ctx: commands.Context, delete_after: Optional[int] = None
     ) -> None:
         """
-            Set the time after which a welcome message is deleted in seconds.
+        Set the time after which a welcome message is deleted in seconds.
 
-            Providing no input will set the bot to not delete after any time.
+        Providing no input will set the bot to not delete after any time.
         """
         if delete_after:
             await ctx.send(
@@ -530,7 +608,7 @@ class Welcome(Events, commands.Cog):
     @welcomeset.group(name="bot")
     async def welcomeset_bot(self, ctx: commands.Context) -> None:
         """
-            Special welcome for bots
+        Special welcome for bots
         """
         pass
 

@@ -22,12 +22,15 @@ _ = lambda s: s
 
 class MentionPrefix(commands.Cog):
     """Ping the bot to see its prefixes."""
+
     intervals = [
         (timedelta(seconds=30), 1),
         (timedelta(minutes=5), 2),
         (timedelta(hours=1), 10),
         (timedelta(days=1), 24),
     ]
+    __version__ = "1.0.0"
+    __author__ = ["Draper"]
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -40,7 +43,7 @@ class MentionPrefix(commands.Cog):
 
     async def red_delete_data_for_user(self, **kwargs):
         """
-            Nothing to delete
+        Nothing to delete
         """
         return
 
@@ -52,8 +55,9 @@ class MentionPrefix(commands.Cog):
 
     @commands.command(name="mentiontoggle")
     @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
     async def commands_mentiontoggle(self, ctx: commands.Context):
-        """Toggle wether mentioning the bot will send a help message."""
+        """Toggle whether mentioning the bot will send a help message."""
         if ctx.guild.id in self.disable_in:
             self.disable_in.discard(ctx.guild.id)
             await ctx.send(_("Mentioning the bot will trigger it to send a help message."))

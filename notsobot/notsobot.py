@@ -88,7 +88,7 @@ class DataProtocol(asyncio.SubprocessProtocol):
 
 class NotSoBot(commands.Cog):
     """
-        Rewrite of many NotSoBot commands to work on RedBot V3
+    Rewrite of many NotSoBot commands to work on RedBot V3
     """
 
     __author__ = ["NotSoSuper", "TrustyJAID"]
@@ -151,14 +151,14 @@ class NotSoBot(commands.Cog):
 
     def format_help_for_context(self, ctx: commands.Context) -> str:
         """
-            Thanks Sinbad!
+        Thanks Sinbad!
         """
         pre_processed = super().format_help_for_context(ctx)
         return f"{pre_processed}\n\nCog Version: {self.__version__}"
 
     async def red_delete_data_for_user(self, **kwargs):
         """
-            Nothing to delete
+        Nothing to delete
         """
         return
 
@@ -293,9 +293,7 @@ class NotSoBot(commands.Cog):
             if b is False:
                 await ctx.send(":warning: **Command download function failed...**")
                 return
-            task = self.bot.loop.run_in_executor(
-                None, self.do_magik, scale, b
-            )
+            task = self.bot.loop.run_in_executor(None, self.do_magik, scale, b)
             try:
                 final, content_msg, file_size = await asyncio.wait_for(task, timeout=60)
             except asyncio.TimeoutError:
@@ -425,14 +423,14 @@ class NotSoBot(commands.Cog):
         y: int = 0,
     ):
         """
-            Add caption to an image
+        Add caption to an image
 
-            `[urls]` are the image urls or users or previous images in chat to add a caption to.
-            `[text=Caption]` is the text to caption on the image.
-            `[color=white]` is the color of the text.
-            `[size=40]` is the size of the text
-            `[x=0]` is the height the text starts at between 0 and 100% where 0 is the top and 100 is the bottom of the image.
-            `[y=0]` is the width the text starts at between 0 and 100% where 0 is the left and 100 is the right of the image.
+        `[urls]` are the image urls or users or previous images in chat to add a caption to.
+        `[text=Caption]` is the text to caption on the image.
+        `[color=white]` is the color of the text.
+        `[size=40]` is the size of the text
+        `[x=0]` is the height the text starts at between 0 and 100% where 0 is the top and 100 is the bottom of the image.
+        `[y=0]` is the width the text starts at between 0 and 100% where 0 is the left and 100 is the right of the image.
         """
         if urls is None:
             urls = await ImageFinder().search_for_images(ctx)
@@ -830,11 +828,11 @@ class NotSoBot(commands.Cog):
             if vertical:
                 # Vertical
                 max_shape = sorted([(np.sum(i.size), i.size) for i in imgs])[1][1]
-                imgs_comb = np.vstack((np.asarray(i.resize(max_shape)) for i in imgs))
+                imgs_comb = np.vstack([np.asarray(i.resize(max_shape)) for i in imgs])
             else:
                 # Horizontal
                 min_shape = sorted([(np.sum(i.size), i.size) for i in imgs])[0][1]
-                imgs_comb = np.hstack((np.asarray(i.resize(min_shape)) for i in imgs))
+                imgs_comb = np.hstack([np.asarray(i.resize(min_shape)) for i in imgs])
             imgs_comb = Image.fromarray(imgs_comb)
             final = BytesIO()
             imgs_comb.save(final, "png")
@@ -974,24 +972,23 @@ class NotSoBot(commands.Cog):
     @commands.bot_has_permissions(attach_files=True)
     async def minecraftachievement(self, ctx, *, txt: str):
         """Generate a Minecraft Achievement"""
-        api = "https://mcgen.herokuapp.com/a.php?i=1&h=Achievement-{0}&t={1}".format(
-            ctx.message.author.name, txt
-        )
-        b, mime = await self.bytes_download(api)
+
+        b, mime = await self.bytes_download("https://i.imgur.com/JtNJFZy.png")
         if b is False:
             await ctx.send(":warning: **Command download function failed...**")
             return
-        i = 0
-        while sys.getsizeof(b) == 88 and i != 10:
-            b, mime = await self.bytes_download(api)
-            if sys.getsizeof(b) != 0:
-                i = 10
-            else:
-                i += 1
-        if i == 10 and sys.getsizeof(b) == 88:
-            await ctx.send("Minecraft Achievement Generator API is bad, pls try again")
-            return
-        file = discord.File(b, filename="achievement.png")
+        if len(txt) > 20:
+            txt = txt[:20] + " ..."
+
+        image = Image.open(b).convert("RGBA")
+        draw = ImageDraw.Draw(image)
+        font_path = str(bundled_data_path(self)) + "/Minecraftia.ttf"
+        font = ImageFont.truetype(font_path, 17)
+        draw.text((60, 30), txt, (255, 255, 255), font=font)
+        final = BytesIO()
+        image.save(final, "png")
+        final.seek(0)
+        file = discord.File(final, filename="achievement.png")
         await ctx.send(file=file)
 
     @commands.command(aliases=["wm"])
@@ -1006,13 +1003,13 @@ class NotSoBot(commands.Cog):
         transparency: Union[int, float] = 0,
     ):
         """
-            Add a watermark to an image
+        Add a watermark to an image
 
-            `[urls]` are the image urls or users or previous images in chat to add a watermark to.
-            `[mark]` is the image to use as the watermark. By default the brazzers icon is used.
-            `[x=0]` is the height the watermark will be at between 0 and 100% where 0 is the top and 100 is the bottom of the image.
-            `[y=0]` is the width the watermark will be at between 0 and 100% where 0 is the left and 100 is the right of the image.
-            `[transparency=0]` is a value from 0 to 100 which determines the percentage the watermark will be transparent.
+        `[urls]` are the image urls or users or previous images in chat to add a watermark to.
+        `[mark]` is the image to use as the watermark. By default the brazzers icon is used.
+        `[x=0]` is the height the watermark will be at between 0 and 100% where 0 is the top and 100 is the bottom of the image.
+        `[y=0]` is the width the watermark will be at between 0 and 100% where 0 is the left and 100 is the right of the image.
+        `[transparency=0]` is a value from 0 to 100 which determines the percentage the watermark will be transparent.
         """
         if urls is None:
             urls = await ImageFinder().search_for_images(ctx)
@@ -1221,9 +1218,7 @@ class NotSoBot(commands.Cog):
                 if len(img_urls) > 1:
                     await ctx.send(":warning: **Command download function failed...**")
                     return
-            task = ctx.bot.loop.run_in_executor(
-                None, self.make_pixel, b, pixels, scale_msg
-            )
+            task = ctx.bot.loop.run_in_executor(None, self.make_pixel, b, pixels, scale_msg)
             try:
                 file, file_size = await asyncio.wait_for(task, timeout=60)
             except asyncio.TimeoutError:

@@ -1,10 +1,12 @@
 import asyncio
 import json
+import logging
 
 from datetime import datetime, timedelta, date
 
 from redbot.core.bot import Red
 from redbot.core import commands, checks, Config
+from redbot.core.utils.chat_formatting import pagify, humanize_list
 from redbot.core.i18n import Translator, cog_i18n
 
 from .errors import InvalidFileError
@@ -24,6 +26,8 @@ except ImportError:
 
 _ = Translator("Hockey", __file__)
 
+log = logging.getLogger("red.trusty-cogs.hockey")
+
 
 class HockeyDev:
 
@@ -41,6 +45,7 @@ class HockeyDev:
         self.all_pickems
         self.save_pickems
         self.pickems_save_lock
+
     #######################################################################
     # Owner Only Commands Mostly for Testing and debuggings
 
@@ -48,17 +53,17 @@ class HockeyDev:
     @checks.is_owner()
     async def hockeydev(self, ctx: commands.Context):
         """
-            Secret dev only commands for Hockey
+        Secret dev only commands for Hockey
 
-            Most of these probably shouldn't be run unless you
-            know exactly what they do.
+        Most of these probably shouldn't be run unless you
+        know exactly what they do.
         """
         pass
 
     @hockeydev.command(name="resetpickemsweekly")
     async def reset_weekly_pickems_data(self, ctx: commands.Context):
         """
-            Force reset all pickems data for the week
+        Force reset all pickems data for the week
         """
         await Pickems.reset_weekly(self.bot)
         guilds_to_make_new_pickems = []
@@ -75,7 +80,7 @@ class HockeyDev:
     @hockeydev.command()
     async def getgoals(self, ctx):
         """
-            Testing function with testgame.json
+        Testing function with testgame.json
         """
         # to_remove = []
         # games_playing = True
@@ -103,7 +108,7 @@ class HockeyDev:
     @hockeydev.command()
     async def pickems_tally(self, ctx):
         """
-            Manually tally the leaderboard
+        Manually tally the leaderboard
         """
         await Pickems.tally_leaderboard(self.bot)
         await ctx.send(_("Leaderboard tallying complete."))
@@ -111,7 +116,7 @@ class HockeyDev:
     @hockeydev.command()
     async def remove_old_pickems(self, ctx, year: int, month: int, day: int):
         """
-            Remove pickems objects created before a specified date.
+        Remove pickems objects created before a specified date.
         """
         start = date(year, month, day)
         good_list = {}
@@ -127,9 +132,9 @@ class HockeyDev:
     @hockeydev.command()
     async def check_pickem_winner(self, ctx, days: int = 1):
         """
-            Manually check all pickems objects for winners
+        Manually check all pickems objects for winners
 
-            `days` number of days to look back
+        `days` number of days to look back
         """
         days = days + 1
         now = datetime.now()
@@ -144,7 +149,7 @@ class HockeyDev:
     @hockeydev.command()
     async def fix_all_pickems(self, ctx):
         """
-            Fixes winner on all current pickems objects if possible
+        Fixes winner on all current pickems objects if possible
         """
         oldest = datetime.now()
         for guild_id, pickems in self.all_pickems.items():
@@ -159,25 +164,27 @@ class HockeyDev:
     @hockeydev.command()
     async def test_gdc(self, ctx):
         """
-            Test checking for new game day channels
+        Test checking for new game day channels
         """
         await GameDayChannels.check_new_gdc(self.bot)
+        await ctx.tick()
 
     @hockeydev.command()
     async def teststandings(self, ctx):
         """
-            Test the automatic standings function/manually update standings
+        Test the automatic standings function/manually update standings
         """
         try:
             await Standings.post_automatic_standings(self.bot)
         except Exception:
             log.debug("error testing standings page", exc_info=True)
+        await ctx.tick()
 
     @hockeydev.command()
     async def cogstats(self, ctx):
         """
-            Display current number of servers and channels
-            the cog is storing in console
+        Display current number of servers and channels
+        the cog is storing in console
         """
         all_channels = await self.config.all_channels()
         all_guilds = await self.config.all_guilds()
@@ -197,16 +204,16 @@ class HockeyDev:
     @hockeydev.command()
     async def customemoji(self, ctx):
         """
-            Set custom emojis for the bot to use
+        Set custom emojis for the bot to use
 
-            Requires you to upload a .yaml file with
-            emojis that the bot can see
-            an example may be found
-            [here](https://github.com/TrustyJAID/Trusty-cogs/blob/master/hockey/emoji.yaml)
-            if no emoji is provided for a team the Other
-            slot will be filled instead
-            It's recommended to have an emoji for every team
-            to utilize all features of the cog such as pickems
+        Requires you to upload a .yaml file with
+        emojis that the bot can see
+        an example may be found
+        [here](https://github.com/TrustyJAID/Trusty-cogs/blob/master/hockey/emoji.yaml)
+        if no emoji is provided for a team the Other
+        slot will be filled instead
+        It's recommended to have an emoji for every team
+        to utilize all features of the cog such as pickems
         """
         attachments = ctx.message.attachments
         if attachments == []:
@@ -226,13 +233,15 @@ class HockeyDev:
                 await ctx.send(_("That file doesn't seem to be formatted correctly."))
                 return
         new_msg = "".join(("<:" + TEAMS[e]["emoji"] + ">") for e in TEAMS)
-        await ctx.send(_("New emojis set to: ") + new_msg)
+        msg = _("New emojis set to: ") + new_msg
+        for page in pagify(msg):
+            await ctx.send(page)
         await ctx.send("You should reload the cog for everything to work correctly.")
 
     @hockeydev.command()
     async def resetgames(self, ctx):
         """
-            Resets the bots game data incase something goes wrong
+        Resets the bots game data incase something goes wrong
         """
         all_teams = await self.config.teams()
         for team in await self.config.teams():
@@ -249,7 +258,7 @@ class HockeyDev:
     @hockeydev.command()
     async def setcreated(self, ctx, created: bool):
         """
-            Sets whether or not the game day channels have been created
+        Sets whether or not the game day channels have been created
         """
         await self.config.created_gdc.set(created)
         await ctx.send(_("created_gdc set to ") + str(created))
@@ -257,8 +266,8 @@ class HockeyDev:
     @hockeydev.command()
     async def cleargdc(self, ctx):
         """
-            Checks for manually deleted channels from the GDC channel list
-            and removes them
+        Checks for manually deleted channels from the GDC channel list
+        and removes them
         """
         guild = ctx.message.guild
         good_channels = []
@@ -271,11 +280,12 @@ class HockeyDev:
             else:
                 good_channels.append(channel.id)
         await self.config.guild(guild).gdc.set(good_channels)
+        await ctx.tick()
 
     @hockeydev.command()
     async def clear_broken_channels(self, ctx):
         """
-            Removes missing channels from the config
+        Removes missing channels from the config
         """
         for channels in await self.config.all_channels():
             channel = self.bot.get_channel(channels)
@@ -290,7 +300,7 @@ class HockeyDev:
     @hockeydev.command()
     async def remove_broken_guild(self, ctx):
         """
-            Removes a server that no longer exists on the bot
+        Removes a server that no longer exists on the bot
         """
         # all_guilds = await self.config.all_guilds()
         for guilds in await self.config.all_guilds():
@@ -306,9 +316,9 @@ class HockeyDev:
     @hockeydev.command()
     async def clear_weekly(self, ctx):
         """
-            Clears the weekly tracker on the current servers pickems
+        Clears the weekly tracker on the current servers pickems
 
-            May not be necessary anymore
+        May not be necessary anymore
         """
         leaderboard = await self.config.guild(ctx.guild).leaderboard()
         if leaderboard is None:
@@ -316,25 +326,25 @@ class HockeyDev:
         for user in leaderboard:
             leaderboard[str(user)]["weekly"] = 0
         await self.config.guild(ctx.guild).leaderboard.set(leaderboard)
+        await ctx.tick()
 
     @hockeydev.command(hidden=True)
     async def lights(self, ctx):
         """
-            Tests the philips Hue light integration
-            This is hard coded at the moment with no plans to make work generally
-            this will be safely ignored.
+        Tests the philips Hue light integration
+        This is hard coded at the moment with no plans to make work generally
+        this will be safely ignored.
         """
         if LIGHTS_SET:
             hue = Oilers(self.bot)
             hue.goal_lights()
             print("done")
-        else:
-            return
+        await ctx.tick()
 
     @hockeydev.command(hidden=True)
     async def testloop(self, ctx):
         """
-            Toggle the test game loop
+        Toggle the test game loop
         """
         self.TEST_LOOP = not self.TEST_LOOP
         await ctx.send(_("Test loop set to ") + str(self.TEST_LOOP))
@@ -342,7 +352,7 @@ class HockeyDev:
     @hockeydev.command()
     async def rempickem(self, ctx):
         """
-            Clears the servers current pickems object list
+        Clears the servers current pickems object list
         """
         await self.config.guild(ctx.guild).pickems.clear()
         await ctx.send(_("All pickems removed on this server."))
@@ -350,7 +360,7 @@ class HockeyDev:
     @hockeydev.command()
     async def remleaderboard(self, ctx):
         """
-            Clears the servers pickems leaderboard
+        Clears the servers pickems leaderboard
         """
         await self.config.guild(ctx.guild).leaderboard.set({})
         await ctx.send(_("Server leaderboard reset."))

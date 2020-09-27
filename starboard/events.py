@@ -68,8 +68,8 @@ class StarboardEvents:
         self, starboard: StarboardEntry, member: Union[discord.Member, discord.User]
     ) -> bool:
         """Checks if the user is allowed to add to the starboard
-           Allows bot owner to always add messages for testing
-           disallows users from adding their own messages"""
+        Allows bot owner to always add messages for testing
+        disallows users from adding their own messages"""
         if isinstance(member, discord.User):
             return True
         user_roles = set([role.id for role in member.roles])
@@ -116,7 +116,9 @@ class StarboardEvents:
             em = message.embeds[0]
             if message.system_content:
                 if em.description != discord.Embed.Empty:
-                    em.description = "{}\n\n{}".format(message.system_content, em.description)[:2048]
+                    em.description = "{}\n\n{}".format(message.system_content, em.description)[
+                        :2048
+                    ]
                 else:
                     em.description = message.system_content
                 if not author.bot:
@@ -157,15 +159,15 @@ class StarboardEvents:
         orig_channel = self.bot.get_channel(message_entry.original_channel)
         new_channel = self.bot.get_channel(message_entry.new_channel)
         try:
-            orig_msg = await orig_channel.get_message(message_entry.original_message)
-        except AttributeError:
             orig_msg = await orig_channel.fetch_message(message_entry.original_message)
+        except discord.errors.Forbidden:
+            return 0
         orig_reaction = [r for r in orig_msg.reactions if str(r.emoji) == str(starboard.emoji)]
         try:
             try:
-                new_msg = await new_channel.get_message(message_entry.new_message)
-            except AttributeError:
                 new_msg = await new_channel.fetch_message(message_entry.new_message)
+            except discord.errors.Forbidden:
+                return 0
             new_reaction = [r for r in new_msg.reactions if str(r.emoji) == str(starboard.emoji)]
             reactions = orig_reaction + new_reaction
         except discord.errors.NotFound:
@@ -175,7 +177,9 @@ class StarboardEvents:
             async for user in reaction.users():
                 if not await self._check_roles(starboard, user):
                     continue
-                if user.id not in unique_users:
+                if not starboard.selfstar and user.id == orig_msg.author.id:
+                    continue
+                if user.id not in unique_users and not user.bot:
                     unique_users.append(user.id)
         return len(unique_users)
 
@@ -238,8 +242,6 @@ class StarboardEvents:
                 return
         try:
             msg = await channel.fetch_message(id=payload.message_id)
-        except AttributeError:
-            msg = await channel.get_message(id=payload.message_id)
         except (discord.errors.NotFound, discord.Forbidden):
             return
         member = guild.get_member(payload.user_id)
@@ -303,14 +305,16 @@ class StarboardEvents:
         user_id: int,
     ):
         """
-            Method for finding users data inside the cog and deleting it.
+        Method for finding users data inside the cog and deleting it.
         """
         for guild_id, starboards in self.starboards.items():
             for starboard, entry in starboards.items():
                 for message in entry.messages:
                     if message["author"] == user_id:
                         self.starboards[guild_id][starboard].messages.remove(message)
-            await self.config.guild_from_id(guild_id).starboards.set(self.starboard[guild_id])
+            await self.config.guild_from_id(guild_id).starboards.set(
+                {n: s.to_json() for n, s in self.starboards[guild_id].items()}
+            )
 
     async def _loop_messages(
         self,
@@ -334,9 +338,7 @@ class StarboardEvents:
             if (same_message and same_channel) or (starboard_message and starboard_channel):
                 count = await self._get_count(messages, starboard)
                 try:
-                    message_edit = await star_channel.fetch_message(messages.new_message)
-                except AttributeError:
-                    message_edit = await star_channel.get_message(messages.new_message)  # type: ignore
+                    message_edit = await star_channel.fetch_message(messages.new_message)  # type: ignore
                     # This is for backwards compatibility for older Red
                 except (discord.errors.NotFound, discord.errors.Forbidden):
                     # starboard message may have been deleted
