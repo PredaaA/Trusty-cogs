@@ -1,13 +1,27 @@
 {
-  "author": ["Twentysix", "TrustyJAID"],
-  "bot_version": [3, 8, 0],
-  "description": "Allows for interaction with cleverbot.com through mention/command",
-  "disabled": false,
-  "hidden": false,
-  "install_msg": "Needs to be setup with an API key first. See `[p]cleverbotset apikey` / `[p]cleverbotset ioapikey`\n[p]cleverbot <text>` to talk with cleverbot.\n`@Mention <text>` works too.\n`[p]cleverbotset toggle` toggles replies by mention.",
-  "min_python_version": [3, 6, 2],
-  "name": "Cleverbot",
-  "short": "Talk with Cleverbot!",
-  "type": "COG",
-  "end_user_data_statement": "This cog does not persistently store data or metadata about users."
+    "author" : [
+        "Twentysix",
+        "TrustyJAID"
+    ],
+    "description" : "Have your bot respond with cleverbot responses. Supports tweaks to customize the responses!",
+    "disabled" : false,
+    "end_user_data_statement" : "This cog does not persistently store data or metadata about users. However, this cog does pass user data to an external API for the purposes of simulated conversation responses.",
+    "hidden" : false,
+    "install_msg" : "Needs to be setup with an API key first. See `[p]cleverbotset apikey` / `[p]cleverbotset ioapikey`\n[p]cleverbot <text>` to talk with cleverbot.\n`@Mention <text>` works too.\n`[p]cleverbotset toggle` toggles replies by mention.",
+    "max_bot_version" : "0.0.0",
+    "min_bot_version" : "3.1.8",
+    "min_python_version" : [
+        3,
+        7,
+        2
+    ],
+    "name" : "Cleverbot",
+    "permissions" : [],
+    "required_cogs" : {},
+    "requirements" : [],
+    "short" : "Talk with Cleverbot!",
+    "tags" : [
+        "cleverbot"
+    ],
+    "type" : "COG"
 }
