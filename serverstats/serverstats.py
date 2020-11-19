@@ -1,34 +1,29 @@
-import discord
 import asyncio
 import datetime
-import aiohttp
-import itertools
 import logging
-
-import time  # this is to be removed before commit
-
-from io import BytesIO
 from copy import copy
-from typing import Union, Optional, List, Tuple, cast, Dict, Literal
+from io import BytesIO
+from typing import Dict, List, Literal, Optional, Tuple, Union, cast
 
-from redbot.core import checks, Config, commands
+import aiohttp
+import discord
+from redbot.core import Config, checks, commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n
+from redbot.core.utils import AsyncIter
 from redbot.core.utils.chat_formatting import (
-    box,
     bold,
+    box,
     escape,
     humanize_number,
     humanize_timedelta,
-    inline,
     pagify,
 )
-from redbot.core.utils.menus import DEFAULT_CONTROLS, menu
-from redbot.core.utils.predicates import MessagePredicate, ReactionPredicate
 from redbot.core.utils.menus import start_adding_reactions
+from redbot.core.utils.predicates import MessagePredicate, ReactionPredicate
 
-from .converters import FuzzyMember, GuildConverter, MultiGuildConverter, ChannelConverter
-
+from .converters import ChannelConverter, FuzzyMember, GuildConverter, MultiGuildConverter
+from .menus import BaseMenu, AvatarPages, GuildPages, ListPages
 
 _ = Translator("ServerStats", __file__)
 log = logging.getLogger("red.trusty-cogs.ServerStats")
@@ -42,7 +37,7 @@ class ServerStats(commands.Cog):
     """
 
     __author__ = ["TrustyJAID", "Preda"]
-    __version__ = "1.5.0"
+    __version__ = "1.5.2"
 
     def __init__(self, bot):
         self.bot: Red = bot
@@ -83,39 +78,20 @@ class ServerStats(commands.Cog):
 
     @commands.command()
     @commands.bot_has_permissions(embed_links=True, add_reactions=True)
-    async def avatar(self, ctx: commands.Context, *members: FuzzyMember):
+    async def avatar(self, ctx: commands.Context, *, members: Optional[FuzzyMember]):
         """
         Display a users avatar in chat
         """
-        embed_list = []
-        if members == ([None],):
-            return await ctx.send(_("No one with that name appears to be on this server."))
         if not members:
-            members = ([ctx.author],)
-        for member in list(itertools.chain.from_iterable(members)):
+            members = [ctx.author]
 
-            em = discord.Embed(title=_("**Avatar**"), colour=member.colour)
-            if member.is_avatar_animated():
-                url = member.avatar_url_as(format="gif")
-            if not member.is_avatar_animated():
-                url = member.avatar_url_as(static_format="png")
-            em.set_image(url=url)
-            try:
-                em.set_author(
-                    name=f"{member} {f'~ {member.nick}' if member.nick else ''}",
-                    icon_url=url,
-                    url=url,
-                )
-            except AttributeError:
-                em.set_author(name=f"{member}", icon_url=url, url=url)
-            embed_list.append(em)
-        if not embed_list:
-            await ctx.send(_("That user does not appear to exist on this server."))
-            return
-        if len(embed_list) > 1:
-            await menu(ctx, embed_list, DEFAULT_CONTROLS)
-        else:
-            await ctx.send(embed=embed_list[0])
+        await BaseMenu(
+            source=AvatarPages(members=members),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+        ).start(ctx=ctx)
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -651,6 +627,7 @@ class ServerStats(commands.Cog):
         return member_list
 
     @commands.group()
+    @commands.guild_only()
     @checks.bot_has_permissions(add_reactions=True)
     async def pruneroles(self, ctx: commands.Context) -> None:
         """
@@ -704,7 +681,14 @@ class ServerStats(commands.Cog):
                 count += 1
                 msg_list.append(msg)
         if msg_list != []:
-            await menu(ctx, msg_list, DEFAULT_CONTROLS)
+            await BaseMenu(
+                source=ListPages(pages=msg_list),
+                delete_message_after=False,
+                clear_reactions_after=True,
+                timeout=60,
+                cog=self,
+                page_start=0,
+            ).start(ctx=ctx)
         else:
             await ctx.send(_("No one was found to be inactive in this time."))
 
@@ -914,11 +898,15 @@ class ServerStats(commands.Cog):
         embed.colour = await ctx.embed_colour()
         embed.set_author(name=f"{member} ({member.id})", icon_url=member.avatar_url)
         if await self.bot.is_owner(ctx.author):
-            guild_list = [m for m in self.bot.get_all_members() if m.id == member.id]
+            guild_list = [
+                m
+                async for m in AsyncIter(self.bot.get_all_members(), steps=500)
+                if m.id == member.id
+            ]
         else:
             guild_list = [
                 m
-                for m in self.bot.get_all_members()
+                async for m in AsyncIter(self.bot.get_all_members(), steps=500)
                 if m.id == member.id and ctx.author in m.guild.members
             ]
 
@@ -967,7 +955,14 @@ class ServerStats(commands.Cog):
             msg += f"{escape(server.name, mass_mentions=True, formatting=True)}: `{humanize_number(server.member_count)}`\n"
             count += 1
         msg_list.append(msg)
-        await menu(ctx, msg_list, DEFAULT_CONTROLS)
+        await BaseMenu(
+            source=ListPages(pages=msg_list),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+            page_start=0,
+        ).start(ctx=ctx)
 
     @commands.command(hidden=True)
     @checks.is_owner()
@@ -987,7 +982,14 @@ class ServerStats(commands.Cog):
             msg += f"{escape(server.name, mass_mentions=True, formatting=True)}: `{humanize_number(server.member_count)}`\n"
             count += 1
         msg_list.append(msg)
-        await menu(ctx, msg_list, DEFAULT_CONTROLS)
+        await BaseMenu(
+            source=ListPages(pages=msg_list),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+            page_start=0,
+        ).start(ctx=ctx)
 
     @commands.group()
     @checks.admin_or_permissions(manage_guild=True)
@@ -1086,6 +1088,7 @@ class ServerStats(commands.Cog):
             pass
 
     @commands.command()
+    @commands.guild_only()
     @checks.mod_or_permissions(manage_messages=True)
     async def topmembers(
         self, ctx: commands.Context, number: int = 10, guild: GuildConverter = None
@@ -1133,7 +1136,14 @@ class ServerStats(commands.Cog):
             else:
                 msg_list.append(header_msg + msg)
             await asyncio.sleep(0.1)
-        await menu(ctx, msg_list, DEFAULT_CONTROLS)
+        await BaseMenu(
+            source=ListPages(pages=msg_list),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+            page_start=0,
+        ).start(ctx=ctx)
 
     @commands.command()
     @checks.is_owner()
@@ -1161,103 +1171,10 @@ class ServerStats(commands.Cog):
         for page in pagify(msg, ["\n"]):
             await ctx.send(page)
 
-    async def guild_menu(
-        self,
-        ctx: commands.Context,
-        post_list: List[discord.Guild],
-        message: discord.Message = None,
-        page=0,
-        timeout: int = 30,
-    ) -> None:
-        """menu control logic for this taken from
-        https://github.com/Lunar-Dust/Dusty-Cogs/blob/master/menu/menu.py"""
-        guild = post_list[page]
-        em = await self.guild_embed(guild)
-        emojis = [
-            "\N{BLACK RIGHTWARDS ARROW}\N{VARIATION SELECTOR-16}",
-            "\N{LEFTWARDS BLACK ARROW}\N{VARIATION SELECTOR-16}",
-            "❌",
-            "\N{OUTBOX TRAY}",
-            "\N{INBOX TRAY}",
-        ]
-        if not message:
-            message = await ctx.send(embed=em)
-            start_adding_reactions(message, emojis)
-        else:
-            # message edits don't return the message object anymore lol
-            await message.edit(embed=em)
-        check = (
-            lambda react, user: user == ctx.message.author
-            and react.emoji
-            in [
-                "\N{BLACK RIGHTWARDS ARROW}\N{VARIATION SELECTOR-16}",
-                "\N{LEFTWARDS BLACK ARROW}\N{VARIATION SELECTOR-16}",
-                "❌",
-                "\N{OUTBOX TRAY}",
-                "\N{INBOX TRAY}",
-            ]
-            and react.message.id == message.id
-        )
-        try:
-            react, _ = await self.bot.wait_for("reaction_add", check=check, timeout=timeout)
-        except asyncio.TimeoutError:
-            for e in emojis:
-                try:
-                    await message.remove_reaction(e, ctx.me)
-                except Exception:
-                    pass
-            return None
-        else:
-            if react.emoji == "\N{BLACK RIGHTWARDS ARROW}\N{VARIATION SELECTOR-16}":
-                next_page = 0
-                if page == len(post_list) - 1:
-                    next_page = 0  # Loop around to the first item
-                else:
-                    next_page = page + 1
-                if ctx.channel.permissions_for(ctx.me).manage_messages:
-                    await message.remove_reaction(
-                        "\N{BLACK RIGHTWARDS ARROW}\N{VARIATION SELECTOR-16}", ctx.message.author
-                    )
-                return await self.guild_menu(
-                    ctx, post_list, message=message, page=next_page, timeout=timeout
-                )
-            elif react.emoji == "\N{LEFTWARDS BLACK ARROW}\N{VARIATION SELECTOR-16}":
-                next_page = 0
-                if page == 0:
-                    next_page = len(post_list) - 1  # Loop around to the last item
-                else:
-                    next_page = page - 1
-                if ctx.channel.permissions_for(ctx.me).manage_messages:
-                    await message.remove_reaction(
-                        "\N{LEFTWARDS BLACK ARROW}\N{VARIATION SELECTOR-16}", ctx.message.author
-                    )
-                return await self.guild_menu(
-                    ctx, post_list, message=message, page=next_page, timeout=timeout
-                )
-            elif react.emoji == "\N{OUTBOX TRAY}":
-                try:
-                    await self.confirm_leave_guild(ctx, guild)
-                except Exception:
-                    pass
-            elif react.emoji == "\N{INBOX TRAY}":
-                invite = await self.get_guild_invite(guild)
-                if invite:
-                    await ctx.send(str(invite))
-                else:
-                    log.debug(type(guild))
-                    log.debug(type(guild.name))
-                    await ctx.send(
-                        _("I cannot find or create an invite for `{guild}`").format(
-                            guild=guild.name
-                        )
-                    )
-            else:
-                return await message.delete()
-
     @staticmethod
     async def confirm_leave_guild(ctx: commands.Context, guild) -> None:
         await ctx.send(
-            _("Are you sure you want to leave {guild}? (reply yes or no)").format(guild=guild.name)
+            _("Are you sure you want me to leave {guild}? (reply yes or no)").format(guild=guild.name)
         )
         pred = MessagePredicate.yes_or_no(ctx)
         await ctx.bot.wait_for("message", check=pred)
@@ -1326,36 +1243,48 @@ class ServerStats(commands.Cog):
 
         `guild_name` can be either the server ID or partial name
         """
-        if guild or await ctx.bot.is_owner(ctx.author):
-            if not ctx.guild:
-                page = 1
-            else:
-                page = ctx.bot.guilds.index(guild) if guild else ctx.bot.guilds.index(ctx.guild)
-            await self.guild_menu(ctx, ctx.bot.guilds, None, page)
-        else:
-            if ctx.guild:
-                await ctx.send(embed=await self.guild_embed(ctx.guild))
+        if not ctx.guild and not await ctx.bot.is_owner(ctx.author):
+            return await ctx.send(_("This command is not available in DM."))
+        guilds = [ctx.guild]
+        page = ctx.bot.guilds.index(ctx.guild)
+        if await ctx.bot.is_owner(ctx.author):
+            guilds = ctx.bot.guilds
+            if guild:
+                page = ctx.bot.guilds.index(guild)
+
+        await BaseMenu(
+            source=GuildPages(guilds=guilds),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+            page_start=page,
+        ).start(ctx=ctx)
 
     @commands.command()
     @commands.bot_has_permissions(embed_links=True)
     @checks.admin()
-    async def getguilds(self, ctx: commands.Context, *guilds: MultiGuildConverter) -> None:
+    async def getguilds(self, ctx: commands.Context, *, guilds: MultiGuildConverter) -> None:
         """
         Display info about multiple servers
 
         `guild_name` can be either the server ID or partial name
         """
-        log.debug(list(itertools.chain.from_iterable(guilds)))
+        page = 0
         if not guilds:
-            if not ctx.guild:
-                page = 0
-            else:
-                page = ctx.bot.guilds.index(ctx.guild)
-            return await self.guild_menu(ctx, ctx.bot.guilds, None, page)
-        else:
-            await self.guild_menu(ctx, list(itertools.chain.from_iterable(guilds)), None, 0)
+            guilds = ctx.bot.guilds
+            page = ctx.bot.guilds.index(ctx.guild)
+        await BaseMenu(
+            source=GuildPages(guilds=guilds),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+            page_start=page,
+        ).start(ctx=ctx)
 
     @commands.command()
+    @commands.guild_only()
     @checks.mod_or_permissions(manage_messages=True)
     async def nummembers(self, ctx: commands.Context, *, guild: GuildConverter = None) -> None:
         """
@@ -1369,6 +1298,7 @@ class ServerStats(commands.Cog):
             "{} has {} members.".format(guild.name, humanize_number(guild.member_count))
         )
 
+    @commands.guild_only()
     @commands.command(aliases=["rolestats"])
     @checks.mod_or_permissions(manage_messages=True)
     async def getroles(self, ctx: commands.Context, *, guild: GuildConverter = None) -> None:
@@ -1395,7 +1325,14 @@ class ServerStats(commands.Cog):
                 msg_list.append(embed)
             else:
                 msg_list.append(page)
-        await menu(ctx, msg_list, DEFAULT_CONTROLS)
+        await BaseMenu(
+            source=ListPages(pages=msg_list),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+            page_start=0,
+        ).start(ctx=ctx)
 
     async def check_highest(self, data):
         highest = 0
@@ -1408,23 +1345,15 @@ class ServerStats(commands.Cog):
 
     @commands.command(name="getreactions", aliases=["getreaction"])
     @checks.mod_or_permissions(manage_messages=True)
-    async def get_reactions(
-        self, ctx: commands.Context, message_id: int, channel: discord.TextChannel = None
-    ) -> None:
+    async def get_reactions(self, ctx: commands.Context, message: discord.Message) -> None:
         """
         Gets a list of all reactions from specified message and displays the user ID,
         Username, and Discriminator and the emoji name.
         """
-        if channel is None:
-            channel = ctx.message.channel
-        try:
-            msg = await channel.fetch_message(message_id)
-        except discord.errors.Forbidden:
-            return
         new_msg = ""
-        for reaction in msg.reactions:
+        for reaction in message.reactions:
             async for user in reaction.users():
-                if type(reaction.emoji) is not str:
+                if isinstance(reaction.emoji, discord.PartialEmoji):
                     new_msg += "{} {}#{} {}\n".format(
                         user.id, user.name, user.discriminator, reaction.emoji.name
                     )
@@ -1441,7 +1370,14 @@ class ServerStats(commands.Cog):
         for page in temp_pages:
             pages.append(f"`Page {i}/{max_i}`\n" + page)
             i += 1
-        await menu(ctx, pages, controls=DEFAULT_CONTROLS)
+        await BaseMenu(
+            source=ListPages(pages=pages),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+            page_start=0,
+        ).start(ctx=ctx)
 
     async def get_server_stats(
         self, guild: discord.Guild
@@ -1681,6 +1617,7 @@ class ServerStats(commands.Cog):
             em.add_field(name=_("Top Members"), value="".join(i for i in member_messages))
         await ctx.send(embed=em)
 
+    @commands.guild_only()
     @commands.command(aliases=["serveremojis"])
     @commands.bot_has_permissions(embed_links=True)
     async def guildemojis(
@@ -1732,4 +1669,11 @@ class ServerStats(commands.Cog):
         if len(emoji_embeds) == 0:
             await ctx.send(_("There are no emojis on {guild}.").format(guild=guild.name))
         else:
-            await menu(ctx, emoji_embeds, DEFAULT_CONTROLS)
+            await BaseMenu(
+                source=ListPages(pages=emoji_embeds),
+                delete_message_after=False,
+                clear_reactions_after=True,
+                timeout=60,
+                cog=self,
+                page_start=0,
+            ).start(ctx=ctx)

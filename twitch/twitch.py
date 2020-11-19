@@ -1,20 +1,15 @@
-import discord
 import asyncio
-import aiohttp
 import logging
+from typing import Literal, Optional
 
-from datetime import datetime
-from typing import Optional, Literal
-
+import discord
 from redbot.core import Config, checks, commands
-from redbot.core.commands import Context
-from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
+from redbot.core.commands.converter import TimedeltaConverter
 
-from .twitch_api import TwitchAPI
-from .twitch_profile import TwitchProfile
-from .twitch_follower import TwitchFollower
 from .errors import TwitchError
-
+from .twitch_api import TwitchAPI
+from .twitch_models import TwitchFollower
+from .menus import BaseMenu, TwitchClipsPages, TwitchFollowersPages
 
 log = logging.getLogger("red.Trusty-cogs.Twitch")
 
@@ -27,7 +22,7 @@ class Twitch(TwitchAPI, commands.Cog):
     """
 
     __author__ = ["TrustyJAID"]
-    __version__ = "1.3.1"
+    __version__ = "1.3.5"
 
     def __init__(self, bot):
         self.bot = bot
@@ -36,13 +31,15 @@ class Twitch(TwitchAPI, commands.Cog):
             "access_token": {},
             "twitch_accounts": [],
             "twitch_clips": {},
+            "version": "0.0.0",
         }
         user_defaults = {"id": "", "login": "", "display_name": ""}
         self.config.register_global(**global_defaults, force_registration=True)
         self.config.register_user(**user_defaults, force_registration=True)
         self.rate_limit_resets = set()
         self.rate_limit_remaining = 0
-        self.loop = bot.loop.create_task(self.check_for_new_followers())
+        self.loop = None
+        self.streams = {}
 
     def format_help_for_context(self, ctx: commands.Context) -> str:
         """
@@ -63,9 +60,30 @@ class Twitch(TwitchAPI, commands.Cog):
         await self.config.user_from_id(user_id).clear()
 
     async def initialize(self):
+        log.debug("Initializing Twitch Cog")
+        if await self.config.version() < "1.2.0":
+            await self.migrate_api_tokens()
+            await self.config.version.set("1.2.0")
+        if await self.config.version() < "1.3.3":
+            await self.migrate_clips()
+        self.loop = asyncio.create_task(self.check_for_new_followers())
+
+    async def migrate_clips(self):
+        async with self.config.twitch_clips() as cur_data:
+            for t_id, data in cur_data.items():
+                if isinstance(data["channels"], list):
+                    channels = {}
+                    for channel in data["channels"]:
+                        channels[str(channel)] = {
+                            "view_count": 0,
+                            "check_back": None,
+                            "clips": data["clips"],
+                        }
+                    cur_data[t_id]["channels"] = channels
+        await self.config.version.set("1.3.3")
+
+    async def migrate_api_tokens(self):
         keys = await self.config.all()
-        if "client_id" not in keys:
-            return
         try:
             central_key = await self.bot.get_shared_api_tokens("twitch")
         except AttributeError:
@@ -91,6 +109,20 @@ class Twitch(TwitchAPI, commands.Cog):
         if await self.config.client_id() == "":
             await ctx.send("You need to set the twitch token first!")
             return
+        pass
+
+    @twitchhelp.group(name="streams")
+    async def twitch_streams(self, ctx: commands.Context) -> None:
+        """
+        Twitch Stream commands
+        """
+        pass
+
+    @twitchhelp.group(name="clips")
+    async def twitch_clips(self, ctx: commands.Context) -> None:
+        """
+        Twitch Clips commands
+        """
         pass
 
     @twitchhelp.command(name="setfollow")
@@ -142,7 +174,7 @@ class Twitch(TwitchAPI, commands.Cog):
                 )
             )
 
-    @twitchhelp.command(name="setclips")
+    @twitch_clips.command(name="setclips")
     @checks.admin_or_permissions(manage_channels=True)
     @commands.guild_only()
     async def set_clips(
@@ -150,9 +182,18 @@ class Twitch(TwitchAPI, commands.Cog):
         ctx: commands.Context,
         twitch_name: str,
         channel: Optional[discord.TextChannel] = None,
+        view_count: Optional[int] = 0,
+        *,
+        check_back: Optional[TimedeltaConverter] = None,
     ) -> None:
         """
         Setup a channel for automatic clip notifications
+
+        `<twitch_name>` The name of the streamers who's clips you want posted
+        `[channel]` The channel to post clips into, if not provided will use the current channel.
+        `[view_count]` The minimum view count required before posting a clip.
+        `[check_back]` How far back to look back for new clips. Note: You must provide a number
+        for `view_count` when providing the check_back. Default is 8 days.
         """
         if channel is None:
             channel = ctx.channel
@@ -165,29 +206,34 @@ class Twitch(TwitchAPI, commands.Cog):
             await ctx.send(e)
             return
         async with self.config.twitch_clips() as cur_accounts:
+            chan_data = {
+                "view_count": view_count,
+                "check_back": check_back.total_seconds() if check_back else None,
+                "clips": []
+            }
             if str(profile.id) not in cur_accounts:
                 try:
                     clips = await self.get_new_clips(profile.id)
                 except TwitchError as e:
                     return await ctx.send(e)
+
                 user_data = {
                     "id": profile.id,
                     "login": profile.login,
                     "display_name": profile.display_name,
-                    "channels": [channel.id],
-                    "clips": [c["id"] for c in clips]
+                    "channels": {str(channel.id): chan_data},
                 }
 
                 cur_accounts[str(profile.id)] = user_data
             else:
-                cur_accounts[str(profile.id)]["channels"].append(channel.id)
+                cur_accounts[str(profile.id)]["channels"][str(channel.id)] = chan_data
         await ctx.send(
             "{} has been setup for new clip notifications in {}".format(
                 profile.display_name, channel.mention
             )
         )
 
-    @twitchhelp.command(name="remclips", aliases=["removeclips", "deleteclips", "delclips"])
+    @twitch_clips.command(name="remclips", aliases=["removeclips", "deleteclips", "delclips"])
     @checks.admin_or_permissions(manage_channels=True)
     @commands.guild_only()
     async def remove_clips(
@@ -213,7 +259,7 @@ class Twitch(TwitchAPI, commands.Cog):
                 )
                 return
             else:
-                if channel.id not in cur_accounts[str(profile.id)]["channels"]:
+                if str(channel.id) not in cur_accounts[str(profile.id)]["channels"]:
                     await ctx.send(
                         "{} is not currently posting new clips in {}".format(
                             profile.login, channel.mention
@@ -221,7 +267,7 @@ class Twitch(TwitchAPI, commands.Cog):
                     )
                     return
                 else:
-                    cur_accounts[str(profile.id)]["channels"].remove(channel.id)
+                    del cur_accounts[str(profile.id)]["channels"][str(channel.id)]
                     if len(cur_accounts[str(profile.id)]["channels"]) == 0:
                         # We don't need to be checking if there's no channels to post in
                         del cur_accounts[str(profile.id)]
@@ -341,11 +387,17 @@ class Twitch(TwitchAPI, commands.Cog):
             return
         new_url = "{}/users/follows?to_id={}&first=100".format(BASE_URL, profile.id)
         data = await self.get_response(new_url)
-        follows = [TwitchFollower.from_json(x) for x in data["data"]]
+        follows = [TwitchFollower(**x) for x in data["data"]]
         total = data["total"]
-        await self.twitch_menu(ctx, follows, total)
+        await BaseMenu(
+            source=TwitchFollowersPages(followers=follows, total_follows=total),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+        ).start(ctx=ctx)
 
-    @twitchhelp.command(name="clips", aliases=["clip"])
+    @twitch_clips.command(name="view")
     async def get_user_clips(
         self, ctx: commands.Context, twitch_name: Optional[str] = None
     ) -> None:
@@ -360,9 +412,17 @@ class Twitch(TwitchAPI, commands.Cog):
             return
         clips = await self.get_new_clips(profile.id)
         if not clips:
-            return await ctx.send(f"{profile.display_name} does not have any public clips available.")
+            return await ctx.send(
+                f"{profile.display_name} does not have any public clips available."
+            )
         urls = [c["url"] for c in clips]
-        await menu(ctx, urls, DEFAULT_CONTROLS)
+        await BaseMenu(
+            source=TwitchClipsPages(clips=urls),
+            delete_message_after=False,
+            clear_reactions_after=True,
+            timeout=60,
+            cog=self,
+        ).start(ctx=ctx)
 
     @twitchhelp.command(name="user", aliases=["profile"])
     async def get_user(self, ctx: commands.Context, twitch_name: Optional[str] = None) -> None:
@@ -376,88 +436,10 @@ class Twitch(TwitchAPI, commands.Cog):
             await ctx.send(e)
             return
         if ctx.channel.permissions_for(ctx.me).embed_links:
-            em = await self.make_user_embed(profile)
+            em = profile.make_user_embed()
             await ctx.send(embed=em)
         else:
             await ctx.send("https://twitch.tv/{}".format(profile.login))
-
-    async def twitch_menu(
-        self,
-        ctx: Context,
-        post_list: list,
-        total_followers=0,
-        message: Optional[discord.Message] = None,
-        page=0,
-        timeout: int = 30,
-    ):
-        """menu control logic for this taken from
-        https://github.com/Lunar-Dust/Dusty-Cogs/blob/master/menu/menu.py"""
-        user_id = post_list[page].from_id
-        followed_at = post_list[page].followed_at
-
-        profile = await self.get_profile_from_id(user_id)
-        em = None
-        if ctx.channel.permissions_for(ctx.me).embed_links:
-            em = await self.make_user_embed(profile)
-            em.timestamp = datetime.strptime(followed_at, "%Y-%m-%dT%H:%M:%SZ")
-
-        prof_url = "https://twitch.tv/{}".format(profile.login)
-
-        if not message:
-            message = await ctx.send(prof_url, embed=em)
-            await message.add_reaction("⬅")
-            await message.add_reaction("❌")
-            await message.add_reaction("➡")
-        else:
-            # message edits don't return the message object anymore lol
-            await message.edit(content=prof_url, embed=em)
-        check = (
-            lambda react, user: user == ctx.message.author
-            and react.emoji in ["➡", "⬅", "❌"]
-            and react.message.id == message.id
-        )
-        try:
-            react, user = await ctx.bot.wait_for("reaction_add", check=check, timeout=timeout)
-        except asyncio.TimeoutError:
-            await message.remove_reaction("⬅", ctx.me)
-            await message.remove_reaction("❌", ctx.me)
-            await message.remove_reaction("➡", ctx.me)
-            return None
-        else:
-            if react.emoji == "➡":
-                next_page = 0
-                if page == len(post_list) - 1:
-                    next_page = 0  # Loop around to the first item
-                else:
-                    next_page = page + 1
-                if ctx.channel.permissions_for(ctx.me).manage_messages:
-                    await message.remove_reaction("➡", ctx.message.author)
-                return await self.twitch_menu(
-                    ctx,
-                    post_list,
-                    total_followers,
-                    message=message,
-                    page=next_page,
-                    timeout=timeout,
-                )
-            elif react.emoji == "⬅":
-                next_page = 0
-                if page == 0:
-                    next_page = len(post_list) - 1  # Loop around to the last item
-                else:
-                    next_page = page - 1
-                if ctx.channel.permissions_for(ctx.me).manage_messages:
-                    await message.remove_reaction("⬅", ctx.message.author)
-                return await self.twitch_menu(
-                    ctx,
-                    post_list,
-                    total_followers,
-                    message=message,
-                    page=next_page,
-                    timeout=timeout,
-                )
-            else:
-                return await message.delete()
 
     @twitchhelp.command(name="creds")
     @checks.is_owner()
@@ -476,8 +458,5 @@ class Twitch(TwitchAPI, commands.Cog):
         await ctx.maybe_send_embed(msg)
 
     def cog_unload(self):
-        if getattr(self, "loop", None) is not None:
+        if getattr(self, "loop", None):
             self.loop.cancel()
-
-    __del__ = cog_unload
-    __unload = cog_unload

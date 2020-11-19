@@ -1,28 +1,29 @@
-import discord
-import logging
-import apraw
 import asyncio
+import logging
+from typing import Optional, Mapping
+
 import aiohttp
-
-from typing import Optional
-
+import apraw
+import discord
 from apraw.models import Submission, Subreddit
+from redbot.core import Config, checks, commands
+from redbot.core.utils import bounded_gather
+from redbot.core.i18n import Translator, cog_i18n
 
-from redbot.core import commands, checks, Config
-
-
-from .menus import RedditMenu, BaseMenu
-from .helpers import BASE_URL, make_embed_from_submission
+from .helpers import make_embed_from_submission, SubredditConverter
+from .menus import BaseMenu, RedditMenu
 
 log = logging.getLogger("red.Trusty-cogs.reddit")
+_ = Translator("Reddit", __file__)
 
 
+@cog_i18n(_)
 class Reddit(commands.Cog):
     """
     A cog to get information from the Reddit API
     """
 
-    __version__ = "1.0.5"
+    __version__ = "1.1.0"
     __author__ = ["TrustyJAID"]
 
     def __init__(self, bot):
@@ -47,6 +48,23 @@ class Reddit(commands.Cog):
         Nothing to delete
         """
         return
+
+    @commands.Cog.listener()
+    async def on_red_api_tokens_update(
+        self, service_name: str, api_tokens: Mapping[str, str]
+    ) -> None:
+        if service_name == "reddit":
+            try:
+                await self.login.close()
+                log.debug("Closed the reddit login.")
+            except Exception:
+                log.exception("Error closing the login.")
+            for name, stream in self._streams.items():
+                try:
+                    stream.cancel()
+                except Exception:
+                    log.debug(f"Error closing stream in {name}")
+            await self.initialize()
 
     async def initialize(self):
         await self.bot.wait_until_red_ready()
@@ -113,7 +131,7 @@ class Reddit(commands.Cog):
                 contents["subreddit"] = subreddit
                 contents["submission"] = submission
                 tasks.append(self.post_new_submissions(channel, contents, use_embed))
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await bounded_gather(*tasks, return_exceptions=True)
 
     async def post_new_submissions(
         self, channel: discord.TextChannel, contents: dict, use_embed: bool
@@ -176,7 +194,10 @@ class Reddit(commands.Cog):
     @redditset.command(name="post")
     @checks.mod_or_permissions(manage_channels=True)
     async def autopost_new_submissions(
-        self, ctx: commands.Context, subreddit: str, channel: Optional[discord.TextChannel] = None
+        self,
+        ctx: commands.Context,
+        subreddit: SubredditConverter,
+        channel: Optional[discord.TextChannel] = None,
     ):
         """
         Setup a channel for automatically posting new subreddit submissions
@@ -184,40 +205,43 @@ class Reddit(commands.Cog):
         `<subreddit>` is the name of the subreddit you want to get updates on.
         `<channel>` is the channel where you want new subreddit posts to be put.
         """
-        if not self.login:
-            return await ctx.send(
-                "The bot owner has not added credentials to utilize this cog.\n"
-                "Have them see `{ctx.clean_prefix}redditset creds` for more information"
-            )
-        if not channel:
+
+        if channel is None:
             channel = ctx.channel
-        sub = await self.login.subreddit(subreddit)
-        if not getattr(sub, "dist", True):
-            return await ctx.send("That doesn't look like a valid subreddit.")
-        if sub.over18 and not ctx.channel.is_nsfw():
-            return await ctx.send("I cannot post contents from this sub in non NSFW channels.")
-        if sub.id not in self.subreddits:
-            self.subreddits[sub.id] = {"name": sub.display_name, "channels": [channel.id]}
-            self._streams[sub.id] = self.bot.loop.create_task(self._run_subreddit_stream(sub))
-            await self.config.subreddits.set_raw(sub.id, value=self.subreddits[sub.id])
+        if subreddit.id not in self.subreddits:
+            self.subreddits[subreddit.id] = {
+                "name": subreddit.display_name,
+                "channels": [channel.id],
+            }
+            self._streams[subreddit.id] = self.bot.loop.create_task(
+                self._run_subreddit_stream(subreddit)
+            )
+            await self.config.subreddits.set_raw(subreddit.id, value=self.subreddits[subreddit.id])
         else:
-            if channel.id not in self.subreddits[sub.id]["channels"]:
-                self.subreddits[sub.id]["channels"].append(channel.id)
+            if channel.id not in self.subreddits[subreddit.id]["channels"]:
+                self.subreddits[subreddit.id]["channels"].append(channel.id)
                 subs = await self.config.subreddits()
-                subs[sub.id]["channels"].append(channel.id)
+                subs[subreddit.id]["channels"].append(channel.id)
                 await self.config.subreddits.set(subs)
             else:
                 return await ctx.send(
-                    f"{sub.display_name_prefixed} is already posting in {channel.menion}."
+                    _("{sub} is already posting in {channel}.").format(
+                        sub=subreddit.display_name_prefixed, channel=channel.mention
+                    )
                 )
         await ctx.send(
-            f"I will now post new submissions to {sub.display_name_prefixed} in {channel.mention}."
+            ("I will now post new submissions to {sub} in {channel}").format(
+                sub=subreddit.display_name_prefixed, channel=channel.mention
+            )
         )
 
     @redditset.command(name="remove")
     @checks.mod_or_permissions(manage_channels=True)
     async def remove_autopost_new_submissions(
-        self, ctx: commands.Context, subreddit: str, channel: Optional[discord.TextChannel] = None
+        self,
+        ctx: commands.Context,
+        subreddit: SubredditConverter,
+        channel: Optional[discord.TextChannel] = None,
     ):
         """
         Remove a channel from automatically posting new subreddit submissions
@@ -225,42 +249,36 @@ class Reddit(commands.Cog):
         `<subreddit>` is the name of the subreddit you want to get updates on.
         `<channel>` is the channel where you want new subreddit posts to be put.
         """
-        if not self.login:
-            return await ctx.send(
-                "The bot owner has not added credentials to utilize this cog.\n"
-                "Have them see `{ctx.clean_prefix}redditset creds` for more information"
-            )
-        if not channel:
+        if channel is None:
             channel = ctx.channel
-        sub = await self.login.subreddit(subreddit)
-        if not getattr(sub, "dist", True):
-            return await ctx.send("That doesn't look like a valid subreddit.")
-        if sub.over18 and not ctx.channel.is_nsfw():
-            return await ctx.send("I cannot post contents from this sub in non NSFW channels.")
-        if sub.id not in self.subreddits:
+        if subreddit.id not in self.subreddits:
             return await ctx.send(
-                f"{sub.display_name_prefixed} is not posting in {channel.mention}."
+                f"{subreddit.display_name_prefixed} is not posting in {channel.mention}."
             )
         else:
-            if channel.id in self.subreddits[sub.id]["channels"]:
-                self.subreddits[sub.id]["channels"].remove(channel.id)
+            if channel.id in self.subreddits[subreddit.id]["channels"]:
+                self.subreddits[subreddit.id]["channels"].remove(channel.id)
                 subs = await self.config.subreddits()
-                subs[sub.id]["channels"].remove(channel.id)
-                if len(subs[sub.id]["channels"]) == 0:
-                    del subs[sub.id]
-                    del self.subreddits[sub.id]
+                subs[subreddit.id]["channels"].remove(channel.id)
+                if len(subs[subreddit.id]["channels"]) == 0:
+                    del subs[subreddit.id]
+                    del self.subreddits[subreddit.id]
                     try:
-                        self._streams[sub.id].cancel()
-                        del self._streams[sub.id]
+                        self._streams[subreddit.id].cancel()
+                        del self._streams[subreddit.id]
                     except Exception:
                         log.exception("Error closing stream")
                 await self.config.subreddits.set(subs)
             else:
                 return await ctx.send(
-                    f"{sub.display_name_prefixed} is not posting in {channel.menion}."
+                    _("{sub} is not posting in {channel}.").format(
+                        sub=subreddit.display_name_prefixed, channel=channel.mention
+                    )
                 )
         await ctx.send(
-            f"I will stop posting new submissions to {sub.display_name_prefixed} in {channel.mention}."
+            ("I will stop posting new submissions to {sub} in {channel}").format(
+                sub=subreddit.display_name_prefixed, channel=channel.mention
+            )
         )
 
     @redditset.command()
@@ -269,7 +287,7 @@ class Reddit(commands.Cog):
         """
         How to setup login information for reddit.
         """
-        msg = (
+        msg = _(
             "1. Go to https://www.reddit.com/prefs/apps and select create another app...\n"
             "2. Give the app a name and description, specify that it's a script\n"
             "3. In the developed apps section under the apps name you provided before below `personal use script` "
@@ -278,8 +296,8 @@ class Reddit(commands.Cog):
             "5. Fill out the rest of the following command with your accounts username and password\n"
             "NOTE: If you have 2FA enabled on your account this will not work, I'd recommend creating a new reddit "
             "account specifically for the bot if that's the case.\n"
-            f"`{ctx.clean_prefix}set api reddit username <username> password <password> client_id <client_id> client_secret <client_secret>`"
-        )
+            "`{prefix}set api reddit username <username> password <password> client_id <client_id> client_secret <client_secret>`"
+        ).format(prefix=ctx.clean_prefix)
         await ctx.maybe_send_embed(msg)
 
     @commands.group()
@@ -287,20 +305,12 @@ class Reddit(commands.Cog):
         """reddit"""
 
     @reddit.command(name="hot")
-    async def reddit_hot(self, ctx: commands.Context, subreddit: str):
+    @commands.bot_has_permissions(add_reactions=True)
+    async def reddit_hot(self, ctx: commands.Context, subreddit: SubredditConverter):
         """
         Show 25 hotest posts on the desired subreddit
         """
-        if not self.login:
-            return await ctx.send(
-                "The bot owner has not added credentials to utilize this cog.\n"
-                "Have them see `{ctx.clean_prefix}redditset creds` for more information"
-            )
-        subreddit = await self.login.subreddit(subreddit)
-        if not getattr(subreddit, "dist", True):
-            return await ctx.send("That doesn't look like a valid subreddit.")
-        if subreddit.over18 and not ctx.channel.is_nsfw():
-            return await ctx.send("I cannot post contents from this sub in non NSFW channels.")
+        await ctx.trigger_typing()
         submissions = subreddit.hot()
         await BaseMenu(
             source=RedditMenu(subreddit=subreddit, submissions=submissions),
@@ -310,20 +320,11 @@ class Reddit(commands.Cog):
         ).start(ctx=ctx)
 
     @reddit.command(name="new")
-    async def reddit_new(self, ctx: commands.Context, subreddit: str):
+    @commands.bot_has_permissions(add_reactions=True)
+    async def reddit_new(self, ctx: commands.Context, subreddit: SubredditConverter):
         """
         Show 25 newest posts on the desired subreddit
         """
-        if not self.login:
-            return await ctx.send(
-                "The bot owner has not added credentials to utilize this cog.\n"
-                "Have them see `{ctx.clean_prefix}redditset creds` for more information"
-            )
-        subreddit = await self.login.subreddit(subreddit)
-        if not getattr(subreddit, "dist", True):
-            return await ctx.send("That doesn't look like a valid subreddit.")
-        if subreddit.over18 and not ctx.channel.is_nsfw():
-            return await ctx.send("I cannot post contents from this sub in non NSFW channels.")
         submissions = subreddit.new()
         await BaseMenu(
             source=RedditMenu(subreddit=subreddit, submissions=submissions),
@@ -333,20 +334,12 @@ class Reddit(commands.Cog):
         ).start(ctx=ctx)
 
     @reddit.command(name="top")
-    async def reddit_top(self, ctx: commands.Context, subreddit: str):
+    @commands.bot_has_permissions(add_reactions=True)
+    async def reddit_top(self, ctx: commands.Context, subreddit: SubredditConverter):
         """
         Show 25 newest posts on the desired subreddit
         """
-        if not self.login:
-            return await ctx.send(
-                "The bot owner has not added credentials to utilize this cog.\n"
-                "Have them see `{ctx.clean_prefix}redditset creds` for more information"
-            )
-        subreddit = await self.login.subreddit(subreddit)
-        if not getattr(subreddit, "dist", True):
-            return await ctx.send("That doesn't look like a valid subreddit.")
-        if subreddit.over18 and not ctx.channel.is_nsfw():
-            return await ctx.send("I cannot post contents from this sub in non NSFW channels.")
+
         submissions = subreddit.top()
         await BaseMenu(
             source=RedditMenu(subreddit=subreddit, submissions=submissions),
@@ -356,20 +349,11 @@ class Reddit(commands.Cog):
         ).start(ctx=ctx)
 
     @reddit.command(name="rising")
-    async def reddit_rising(self, ctx: commands.Context, subreddit: str):
+    @commands.bot_has_permissions(add_reactions=True)
+    async def reddit_rising(self, ctx: commands.Context, subreddit: SubredditConverter):
         """
         Show 25 newest posts on the desired subreddit
         """
-        if not self.login:
-            return await ctx.send(
-                "The bot owner has not added credentials to utilize this cog.\n"
-                "Have them see `{ctx.clean_prefix}redditset creds` for more information"
-            )
-        subreddit = await self.login.subreddit(subreddit)
-        if not getattr(subreddit, "dist", True):
-            return await ctx.send("That doesn't look like a valid subreddit.")
-        if subreddit.over18 and not ctx.channel.is_nsfw():
-            return await ctx.send("I cannot post contents from this sub in non NSFW channels.")
         submissions = subreddit.rising()
         await BaseMenu(
             source=RedditMenu(subreddit=subreddit, submissions=submissions),
@@ -379,20 +363,11 @@ class Reddit(commands.Cog):
         ).start(ctx=ctx)
 
     @reddit.command(name="random")
-    async def reddit_random(self, ctx: commands.Context, subreddit: str):
+    @commands.bot_has_permissions(add_reactions=True)
+    async def reddit_random(self, ctx: commands.Context, subreddit: SubredditConverter):
         """
         Show 25 newest posts on the desired subreddit
         """
-        if not self.login:
-            return await ctx.send(
-                "The bot owner has not added credentials to utilize this cog.\n"
-                "Have them see `{ctx.clean_prefix}redditset creds` for more information"
-            )
-        subreddit = await self.login.subreddit(subreddit)
-        if not getattr(subreddit, "dist", True):
-            return await ctx.send("That doesn't look like a valid subreddit.")
-        if subreddit.over18 and not ctx.channel.is_nsfw():
-            return await ctx.send("I cannot post contents from this sub in non NSFW channels.")
         submission = await subreddit.random()
         if submission.over_18 and not ctx.channel.is_nsfw():
             for i in range(0, 10):
@@ -406,4 +381,4 @@ class Reddit(commands.Cog):
             else:
                 await ctx.send(data["content"])
         else:
-            await ctx.send("I could not find a suitable random post on that subreddit.")
+            await ctx.send(_("I could not find a suitable random post on that subreddit."))

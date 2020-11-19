@@ -1,41 +1,40 @@
-import discord
-import aiohttp
 import asyncio
-import json
-import yaml
-import logging
 import base64
-
+import json
+import logging
+from datetime import datetime, timedelta
 from io import BytesIO
-from typing import Union, Optional, Literal
-from datetime import datetime, timedelta, date
+from typing import Literal, Optional
 from urllib.parse import quote
 
-from redbot.core import commands, checks, Config, VersionInfo, version_info
+import aiohttp
+import discord
+import yaml
+from redbot.core import Config, VersionInfo, checks, commands, version_info
 from redbot.core.i18n import Translator, cog_i18n
+from redbot.core.data_manager import cog_data_path
 from redbot.core.utils.chat_formatting import humanize_list
 
-
-from .teamentry import TeamEntry
+from .constants import BASE_URL, CONFIG_ID, CONTENT_URL, HEADSHOT_URL, TEAMS
+from .dev import HockeyDev
+from .errors import InvalidFileError, NotAValidTeamError, UserHasVotedError, VotingHasEndedError
+from .game import Game
+from .gamedaychannels import GameDayChannels
+from .helper import HockeyStandings, HockeyStates, HockeyTeams, TeamDateFinder, YearFinder, YEAR_RE
 from .menu import (
     BaseMenu,
-    GamesMenu,
-    StandingsPages,
-    TeamStandingsPages,
     ConferenceStandingsPages,
     DivisionStandingsPages,
-    RosterPages,
+    GamesMenu,
     LeaderboardPages,
+    StandingsPages,
+    TeamStandingsPages,
+    PlayerPages,
 )
-from .helper import HockeyStandings, HockeyTeams, HockeyStates, TeamDateFinder
-from .errors import UserHasVotedError, VotingHasEndedError, NotAValidTeamError, InvalidFileError
-from .game import Game
 from .pickems import Pickems
-from .standings import Standings
-from .gamedaychannels import GameDayChannels
-from .constants import BASE_URL, CONFIG_ID, TEAMS, HEADSHOT_URL, CONTENT_URL
 from .schedule import Schedule
-from .dev import HockeyDev
+from .standings import Standings
+from .teamentry import TeamEntry
 
 _ = Translator("Hockey", __file__)
 
@@ -48,17 +47,17 @@ class Hockey(HockeyDev, commands.Cog):
     Gather information and post goal updates for NHL hockey teams
     """
 
-    __version__ = "2.12.4"
+    __version__ = "2.13.1"
     __author__ = ["TrustyJAID"]
 
     def __init__(self, bot):
         self.bot = bot
-        self.session = aiohttp.ClientSession(loop=self.bot.loop)
         default_global = {"teams": [], "created_gdc": False, "print": False}
         for team in TEAMS:
             team_entry = TeamEntry("Null", team, 0, [], {}, [], "")
             default_global["teams"].append(team_entry.to_json())
         default_global["teams"].append(team_entry.to_json())
+        default_global["player_db"] = 0
         default_guild = {
             "standings_channel": None,
             "standings_type": None,
@@ -94,11 +93,11 @@ class Hockey(HockeyDev, commands.Cog):
         self.config.register_global(**default_global)
         self.config.register_guild(**default_guild)
         self.config.register_channel(**default_channel)
-        self.loop = bot.loop.create_task(self.game_check_loop())
+        self.loop = None
         self.TEST_LOOP = False
         # used to test a continuous loop of a single game data
         self.all_pickems = {}
-        self.pickems_save_loop = bot.loop.create_task(self.save_pickems_data())
+        self.pickems_save_loop = None
         self.save_pickems = True
         self.pickems_save_lock = asyncio.Lock()
         self.current_games = {}
@@ -122,6 +121,11 @@ class Hockey(HockeyDev, commands.Cog):
             if str(user_id) in data["leaderboard"]:
                 del data["leaderboard"][str(user_id)]
                 await self.config.guild_from_id(g_id).leaderboard.set(data["leaderboard"])
+
+    async def initialize(self):
+        await self.initialize_pickems()
+        self.loop = asyncio.create_task(self.game_check_loop())
+        self.pickems_save_loop = asyncio.create_task(self.save_pickems_data())
 
     ##############################################################################
     # Here is all the logic for gathering game data and updating information
@@ -403,8 +407,9 @@ class Hockey(HockeyDev, commands.Cog):
          with values in a properly formatted .yaml file
         """
         try:
-            async with self.session.get(attachments[0].url) as infile:
-                data = yaml.safe_load(await infile.read())
+            async with aiohttp.ClientSession() as session:
+                async with session.get(attachments[0].url) as infile:
+                    data = yaml.safe_load(await infile.read())
         except yaml.error.YAMLError as exc:
             raise InvalidFileError("Error Parsing the YAML") from exc
         # new_dict = {}
@@ -1310,45 +1315,134 @@ class Hockey(HockeyDev, commands.Cog):
             timeout=60,
         ).start(ctx=ctx)
 
-    @hockey_commands.command(aliases=["player", "players"])
-    async def roster(self, ctx, *, search: str):
-        """
-        Search for a player or get a team roster
-        """
-        rosters = {}
-        players = []
-        teams = [team for team in TEAMS if search.lower() in team.lower()]
-        if teams != []:
-            for team in teams:
-                url = f"{BASE_URL}/api/v1/teams/{TEAMS[team]['id']}/roster"
-                async with self.session.get(url) as resp:
-                    data = await resp.json()
-                for player in data["roster"]:
-                    players.append(player)
-        else:
-            for team in TEAMS:
-                url = f"{BASE_URL}/api/v1/teams/{TEAMS[team]['id']}/roster"
-                async with self.session.get(url) as resp:
-                    data = await resp.json()
-                try:
-                    rosters[team] = data["roster"]
-                except KeyError:
-                    pass
+    async def player_id_lookup(self, name: str):
+        now = datetime.utcnow()
+        saved = datetime.fromtimestamp(await self.config.player_db())
+        path = cog_data_path(self) / "players.json"
+        if (now - saved) > timedelta(days=1) or not path.exists():
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://records.nhl.com/site/api/player?include=id&include=fullName&include=onRoster") as resp:
+                    with path.open(encoding="utf-8", mode="w") as f:
+                        json.dump(await resp.json(), f)
+            await self.config.player_db.set(int(now.timestamp()))
+        with path.open(encoding="utf-8", mode="r") as f:
 
-            for team in rosters:
-                for player in rosters[team]:
-                    if search.lower() in player["person"]["fullName"].lower():
-                        players.append(player)
+            players = []
+            for player in json.loads(f.read())["data"]:
+                if name.lower() in player["fullName"].lower():
+                    if player["onRoster"] == "N":
+                        players.append(player["id"])
+                    else:
+                        players.insert(0, player["id"])
+        log.debug(players)
+        return players
 
+    @hockey_commands.command(aliases=["players"])
+    @commands.bot_has_permissions(embed_links=True, add_reactions=True)
+    async def player(
+        self,
+        ctx: commands.Context,
+        *,
+        search: str,
+    ):
+        """
+        Lookup information about a specific player
+
+        `<search>` The name of the player to search for
+        you can include the season to get stats data on format can be `YYYY` or `YYYYYYYY`
+        """
+        async with ctx.typing():
+            season = YEAR_RE.search(search)
+            season_str = None
+            if season:
+                search = YEAR_RE.sub("", search)
+                if season.group(3):
+                    if (int(season.group(3)) - int(season.group(1))) > 1:
+                        return await ctx.send(_("Dates must be only 1 year apart."))
+                    if (int(season.group(3)) - int(season.group(1))) <= 0:
+                        return await ctx.send(_("Dates must be only 1 year apart."))
+                    if int(season.group(1)) > datetime.now().year:
+                        return await ctx.send(_("Please select a year prior to now."))
+                    season_str = f"{season.group(1)}{season.group(3)}"
+                else:
+                    if int(season.group(1)) > datetime.now().year:
+                        return await ctx.send(_("Please select a year prior to now."))
+                    year = int(season.group(1)) + 1
+                    season_str = f"{season.group(1)}{year}"
+            log.debug(season)
+            log.debug(search)
+            players = await self.player_id_lookup(search.strip())
         if players != []:
             await BaseMenu(
-                source=RosterPages(pages=players),
+                source=PlayerPages(pages=players, season=season_str),
                 delete_message_after=False,
                 clear_reactions_after=True,
                 timeout=60,
             ).start(ctx=ctx)
         else:
-            await ctx.send(search + _(" is not an NHL team or Player!"))
+            await ctx.send(
+                _('I could not find any player data for "{player}".').format(player=search)
+            )
+
+    @hockey_commands.command()
+    @commands.bot_has_permissions(embed_links=True, add_reactions=True)
+    async def roster(self, ctx, season: Optional[YearFinder] = None, *, search: HockeyTeams):
+        """
+        Search for a player or get a team roster
+
+        `[season]` The season to get stats data on format can be `YYYY` or `YYYYYYYY`
+        `<search>` The name of the team to search for
+        """
+        season_str = None
+        season_url = ""
+        if season:
+            if season.group(3):
+                if (int(season.group(3)) - int(season.group(1))) > 1:
+                    return await ctx.send(_("Dates must be only 1 year apart."))
+                if (int(season.group(3)) - int(season.group(1))) <= 0:
+                    return await ctx.send(_("Dates must be only 1 year apart."))
+                if int(season.group(1)) > datetime.now().year:
+                    return await ctx.send(_("Please select a year prior to now."))
+                season_str = f"{season.group(1)}{season.group(3)}"
+            else:
+                if int(season.group(1)) > datetime.now().year:
+                    return await ctx.send(_("Please select a year prior to now."))
+                year = int(season.group(1)) + 1
+                season_str = f"{season.group(1)}{year}"
+        if season:
+            season_url = f"?season={season_str}"
+        rosters = {}
+        players = []
+        teams = [team for team in TEAMS if search.lower() in team.lower()]
+        if teams != []:
+            for team in teams:
+                url = f"{BASE_URL}/api/v1/teams/{TEAMS[team]['id']}/roster{season_url}"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as resp:
+                        data = await resp.json()
+                if "roster" in data:
+                    for player in data["roster"]:
+                        players.append(player["person"]["id"])
+        else:
+            return await ctx.send(_("No team name was provided."))
+
+        if players:
+            await BaseMenu(
+                source=PlayerPages(pages=players, season=season_str),
+                delete_message_after=False,
+                clear_reactions_after=True,
+                timeout=60,
+            ).start(ctx=ctx)
+        else:
+            if season:
+                year = _(" in the {season} season").format(
+                    season=f"{season.group(1)}-{season.group(3)}"
+                )
+            else:
+                year = ""
+            await ctx.send(
+                _("I could not find a roster for the {team}{year}.").format(team=team, year=year)
+            )
 
     @hockey_commands.command(hidden=True)
     @checks.mod_or_permissions(manage_messages=True)
@@ -1642,13 +1736,14 @@ class Hockey(HockeyDev, commands.Cog):
                 "here but don't go on another discord and preach "
                 "it to an angry mob after we just won.\n- "
                 "Not following the above rules will result in "
-                "appropriate punishments ranging from a warning"
+                "appropriate punishments ranging from a warning "
                 "to a ban. ```\n\nhttps://discord.gg/reddithockey"
             )
             eastern_conference = "https://i.imgur.com/CtXvcCs.png"
             western_conference = "https://i.imgur.com/UFYJTDF.png"
-            async with self.session.get(eastern_conference) as resp:
-                data = await resp.read()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(eastern_conference) as resp:
+                    data = await resp.read()
             logo = BytesIO()
             logo.write(data)
             logo.seek(0)
@@ -1656,8 +1751,9 @@ class Hockey(HockeyDev, commands.Cog):
             await ctx.send(msg1, file=image)
             for division in team_list:
                 if division == "Central":
-                    async with self.session.get(western_conference) as resp:
-                        data = await resp.read()
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(western_conference) as resp:
+                            data = await resp.read()
                     logo = BytesIO()
                     logo.write(data)
                     logo.seek(0)
@@ -1673,15 +1769,20 @@ class Hockey(HockeyDev, commands.Cog):
                     await ctx.send(msg)
 
     async def save_pickems_unload(self):
-        async with self.pickems_save_lock:
-            for guild_id, pickems in self.all_pickems.items():
-                guild_obj = discord.Object(id=int(guild_id))
-                await self.config.guild(guild_obj).pickems.set(
-                    {name: p.to_json() for name, p in pickems.items()}
-                )
+        try:
+            async with self.pickems_save_lock:
+                for guild_id, pickems in self.all_pickems.items():
+                    guild_obj = discord.Object(id=int(guild_id))
+                    await self.config.guild(guild_obj).pickems.set(
+                        {name: p.to_json() for name, p in pickems.items()}
+                    )
+        except AttributeError:
+            # I removed this for testing most likely
+            pass
+        except Exception:
+            log.exception("Something went wrong with the pickems unload")
 
     def cog_unload(self):
-        self.bot.loop.create_task(self.session.close())
         self.bot.loop.create_task(self.save_pickems_unload())
         if getattr(self, "loop", None) is not None:
             self.loop.cancel()
@@ -1689,6 +1790,3 @@ class Hockey(HockeyDev, commands.Cog):
             log.debug("canceling pickems save loop")
             self.save_pickems = False
             self.pickems_save_loop.cancel()
-
-    __del__ = cog_unload
-    __unload = cog_unload

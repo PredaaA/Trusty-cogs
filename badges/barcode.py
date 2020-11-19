@@ -7,10 +7,11 @@ Which is itself a port of python-barcode which is no longer available
 
 import gzip
 import os
-import xml.dom
 import string
-from redbot.core.data_manager import bundled_data_path
+import xml.dom
+import logging
 
+from redbot.core.data_manager import bundled_data_path
 
 try:
     import Image
@@ -29,6 +30,8 @@ try:
     _strbase = basestring  # lint:ok
 except NameError:
     _strbase = str
+
+log = logging.getLogger("red.Trusty-cogs.badges")
 
 
 def mm2px(mm, dpi=300):
@@ -490,10 +493,7 @@ class Barcode(object):
                 The same as in `self.render`.
         """
         output = self.render(options)
-        if hasattr(output, "tostring"):
-            output.save(fp, format=self.writer.format)
-        else:
-            fp.write(output)
+        output.save(fp, format=self.writer.format)
 
     def render(self, writer_options=None):
         """Renders the barcode using `self.writer`.
@@ -591,8 +591,4 @@ def get_barcode(name, code=None, writer=None):
 def generate(name, code, writer=None, output=None, writer_options=None):
     options = writer_options or {}
     barcode = get_barcode(name, code, writer)
-    if isinstance(output, _strbase):
-        fullname = barcode.save(output, options)
-        return fullname
-    else:
-        barcode.write(output, options)
+    barcode.write(output, options)

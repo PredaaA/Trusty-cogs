@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Optional
 
 import discord
 from discord.ext.commands.errors import BadArgument
 from redbot.core.commands import commands
 from redbot.core.i18n import Translator
 from redbot.core.utils.chat_formatting import box, humanize_list, pagify
-from redbot.vendored.discord.ext import menus
-from redbot.core.utils.predicates import ReactionPredicate
 from redbot.core.utils.menus import start_adding_reactions
+from redbot.core.utils.predicates import ReactionPredicate
+from redbot.vendored.discord.ext import menus
 
-
-from .converters import Trigger, ChannelUserRole
+from .converters import ChannelUserRole, Trigger
 
 log = logging.getLogger("red.Trusty-cogs.retrigger")
 _ = Translator("ReTrigger", __file__)
@@ -112,14 +111,16 @@ class ReTriggerPages(menus.ListPageSource):
                 count=trigger.count,
                 response=responses,
             )
+        text_response = ""
         if trigger.ignore_commands:
             info += _("Ignore commands: **{ignore}**\n").format(ignore=trigger.ignore_commands)
         if "text" in trigger.response_type:
             if trigger.multi_payload:
-                response = "\n".join(t[1] for t in trigger.multi_payload if t[0] == "text")
+                text_response = "\n".join(t[1] for t in trigger.multi_payload if t[0] == "text")
             else:
-                response = trigger.text
-            info += _("__Text__: ") + "**{response}**\n".format(response=response)
+                text_response = trigger.text
+            if len(text_response) < 200:
+                info += _("__Text__: ") + "**{response}**\n".format(response=text_response)
         if "rename" in trigger.response_type:
             if trigger.multi_payload:
                 response = "\n".join(t[1] for t in trigger.multi_payload if t[0] == "text")
@@ -181,9 +182,9 @@ class ReTriggerPages(menus.ListPageSource):
             else:
                 info += _("__Roles Added__: Deleted Roles\n")
         if whitelist_s:
-            info += _("__Whitelist__: ") + whitelist_s + "\n"
+            info += _("__Allowlist__: ") + whitelist_s + "\n"
         if blacklist_s:
-            info += _("__Blacklist__: ") + blacklist_s + "\n"
+            info += _("__Blocklist__: ") + blacklist_s + "\n"
         if trigger.cooldown:
             time = trigger.cooldown["time"]
             style = trigger.cooldown["style"]
@@ -196,9 +197,10 @@ class ReTriggerPages(menus.ListPageSource):
             info += _("Message deleted after: {time} seconds.\n").format(time=trigger.delete_after)
         if trigger.read_filenames:
             info += _("Read filenames: **Enabled**\n")
-
+        if trigger.chance:
+            info += _("__Chance__: **1 in {number}**\n").format(number=trigger.chance)
         if embeds:
-            info += _("__Regex__: ") + box(trigger.regex.pattern, lang="bf")
+            # info += _("__Regex__: ") + box(trigger.regex.pattern, lang="bf")
             em = discord.Embed(
                 timestamp=menu.ctx.message.created_at,
                 colour=await menu.ctx.embed_colour(),
@@ -218,6 +220,17 @@ class ReTriggerPages(menus.ListPageSource):
                     first = False
                 else:
                     em.add_field(name=_("Trigger info continued"), value=pages)
+            if len(text_response) >= 200:
+                use_box = False
+                for page in pagify(text_response, page_length=1000):
+                    if page.startswith("```"):
+                        use_box = True
+                    if use_box:
+                        em.add_field(name=_("__Text__"), value=box(page.replace("```", ""), lang="text"))
+                    else:
+                        em.add_field(name=_("__Text__"), value=page)
+            for page in pagify(trigger.regex.pattern, page_length=1000):
+                em.add_field(name=_("__Regex__"), value=box(page, lang="bf"))
             msg_list.append(em)
         else:
             info += _("Regex: ") + box(trigger.regex.pattern[: 2000 - len(info)], lang="bf")
@@ -411,7 +424,7 @@ class ReTriggerMenu(menus.MenuPages, inherit_buttons=False):
                     page = await self._source.get_page(self.current_page)
                     kwargs = await self._get_kwargs_from_page(page)
                     await self.message.edit(
-                        content=_("This trigger has beend deleted."), embed=kwargs["embed"]
+                        content=_("This trigger has been deleted."), embed=kwargs["embed"]
                     )
                     for t in self.cog.triggers[self.ctx.guild.id]:
                         if t.name == self.source.selection.name:

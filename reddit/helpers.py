@@ -1,15 +1,54 @@
-import discord
 import logging
+import apraw
 import re
 
-from apraw.models import Subreddit, Submission
 
+from redbot.core import commands
+from redbot.core.i18n import Translator
+import discord
+from discord.ext.commands.converter import Converter
+from discord.ext.commands.errors import BadArgument
+from apraw.models import Submission, Subreddit
 
 BASE_URL = "https://reddit.com"
 
 SELF_POST_SCRUB = re.compile(r"^(&#x200B;[\s\n]+)(https?://.+)$")
 
+REDDIT_RE = re.compile(r"\/?r\/([a-zA-Z0-9_]+)")
+
 log = logging.getLogger("red.Trusty-cogs.reddit")
+
+_ = Translator("Reddit", __file__)
+
+
+class SubredditConverter(Converter):
+    async def convert(self, ctx: commands.Context, argument: str) -> apraw.models.Subreddit:
+        if not ctx.cog.login:
+            raise BadArgument(
+                _(
+                    "The bot owner has not added credentials to utilize this cog.\n"
+                    "Have them see `{prefix}redditset creds` for more information"
+                ).format(prefix=ctx.clean_prefix)
+            )
+        await ctx.trigger_typing()
+        subr = REDDIT_RE.search(argument)
+        if subr:
+            subreddit = subr.group(1)
+        else:
+            subreddit = re.sub(r"<|>|\/|\\|\.|,|;|\'|\"", "", argument)
+        try:
+            sub = await ctx.cog.login.subreddit(subreddit)
+        except Exception:
+            raise BadArgument(
+                _("`{argument}` does not look like a valid subreddit.").format(argument=argument)
+            )
+        if len(sub._data.keys()) < 7:
+            raise BadArgument(
+                _("`{argument}` does not look like a valid subreddit.").format(argument=argument)
+            )
+        if getattr(sub, "over18", False) and not ctx.channel.is_nsfw():
+            raise BadArgument(_("I cannot post contents from this sub in non-NSFW channels."))
+        return sub
 
 
 async def make_embed_from_submission(
@@ -50,8 +89,12 @@ async def make_embed_from_submission(
         has_text = True
         text = SELF_POST_SCRUB.sub("", submission.selftext)
         em.description = text[:512]
-    author_name = await submission.author()
-    author_str = f"[u/{author_name}]({BASE_URL}/u/{author_name})"
+    try:
+        author_name = await submission.author()
+        author_str = f"[u/{author_name}]({BASE_URL}/u/{author_name})"
+    except Exception:
+        author_name = _("Unknown or Deleted User")
+        author_str = _("Unknown or Deleted User")
     em.add_field(name="Post Author", value=author_str)
     # em.add_field(name="Content Warning", value=)
     # link_str = f"[Click to see full post]({BASE_URL}{submission.permalink})"

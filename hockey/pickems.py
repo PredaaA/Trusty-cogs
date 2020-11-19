@@ -1,13 +1,13 @@
-import discord
 import asyncio
 import logging
-import aiohttp
-
 from datetime import datetime, timedelta
+
+import aiohttp
+import discord
 from redbot.core.i18n import Translator
 
-from .errors import NotAValidTeamError, VotingHasEndedError, UserHasVotedError
 from .constants import TEAMS
+from .errors import NotAValidTeamError, UserHasVotedError, VotingHasEndedError
 from .game import Game
 
 _ = Translator("Hockey", __file__)
@@ -306,7 +306,6 @@ class Pickems:
                     if channel:
                         await Pickems.create_pickems_game_msg(bot, channel, game)
                         await asyncio.sleep(0.1)
-            # await asyncio.gather(*game_msg_tasks)
             today = today + new_day
             count += 1
             if today.weekday() == 6 or count == 7:

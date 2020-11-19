@@ -1,14 +1,13 @@
-import discord
 import logging
-
-from redbot.core import commands, checks, Config, modlog
-from redbot.core.utils.chat_formatting import humanize_list
-from redbot.core.i18n import Translator, cog_i18n
 from typing import Union
 
-from .eventmixin import EventMixin, CommandPrivs, EventChooser
-from .settings import inv_settings
+import discord
+from redbot.core import Config, checks, commands, modlog
+from redbot.core.i18n import Translator, cog_i18n
+from redbot.core.utils.chat_formatting import humanize_list
 
+from .eventmixin import CommandPrivs, EventChooser, EventMixin
+from .settings import inv_settings
 
 _ = Translator("ExtendedModLog", __file__)
 logger = logging.getLogger("red.trusty-cogs.ExtendedModLog")
@@ -22,7 +21,7 @@ class ExtendedModLog(EventMixin, commands.Cog):
     """
 
     __author__ = ["RePulsar", "TrustyJAID"]
-    __version__ = "2.8.12"
+    __version__ = "2.8.15"
 
     def __init__(self, bot):
         self.bot = bot
@@ -30,6 +29,7 @@ class ExtendedModLog(EventMixin, commands.Cog):
         self.config.register_guild(**inv_settings)
         self.config.register_global(version="0.0.0")
         self.settings = {}
+        self._ban_cache = {}
         self.loop = bot.loop.create_task(self.invite_links_loop())
 
     def format_help_for_context(self, ctx: commands.Context):
@@ -331,7 +331,7 @@ class ExtendedModLog(EventMixin, commands.Cog):
             `emoji_change`
             `commands_used`
 
-            **Requires Red 3.3 and discord.py 1.3**
+            ** requires manage_channel permissions**
             `invite_created`
             `invite_deleted`
         """

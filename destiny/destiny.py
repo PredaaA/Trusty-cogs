@@ -1,20 +1,18 @@
-import discord
-import logging
 import asyncio
 import datetime
+import logging
+from typing import List, Literal, Optional
 
-from typing import Optional, List, Literal
-
-from redbot.core import commands, Config, checks
+import discord
+from redbot.core import Config, checks, commands
 from redbot.core.i18n import Translator, cog_i18n
-from redbot.core.utils.menus import menu, DEFAULT_CONTROLS, start_adding_reactions
 from redbot.core.utils.chat_formatting import pagify
+from redbot.core.utils.menus import DEFAULT_CONTROLS, menu, start_adding_reactions
 from redbot.core.utils.predicates import ReactionPredicate
 
-from .errors import Destiny2APIError, Destiny2MissingManifest
-from .converter import DestinyActivity, StatsPage
 from .api import DestinyAPI
-
+from .converter import DestinyActivity, StatsPage
+from .errors import Destiny2APIError, Destiny2MissingManifest
 
 BASE_URL = "https://www.bungie.net/Platform"
 IMAGE_URL = "https://www.bungie.net"
@@ -30,7 +28,7 @@ class Destiny(DestinyAPI, commands.Cog):
     Get information from the Destiny 2 API
     """
 
-    __version__ = "1.3.4"
+    __version__ = "1.3.5"
     __author__ = "TrustyJAID"
 
     def __init__(self, bot):
@@ -105,6 +103,14 @@ class Destiny(DestinyAPI, commands.Cog):
     async def destiny(self, ctx: commands.Context) -> None:
         """Get information from the Destiny 2 API"""
         pass
+
+    @destiny.command()
+    async def forgetme(self, ctx: commands.Context) -> None:
+        """
+        Remove your authorization to the destiny API on the bot
+        """
+        await self.red_delete_data_for_user(requester="user", user_id=ctx.author.id)
+        await ctx.send(_("Your authorization has been reset."))
 
     @destiny.group(aliases=["s"])
     async def search(self, ctx: commands.Context) -> None:

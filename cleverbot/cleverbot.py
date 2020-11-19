@@ -1,22 +1,13 @@
-import discord
 import logging
-import re
-
 from typing import Optional, Union
 
-from redbot import version_info, VersionInfo
-from redbot.core import commands, checks, Config
+import discord
+from redbot.core import Config, checks, commands
 from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils.chat_formatting import humanize_list, pagify
 
-from .api import CleverbotAPI, ChannelUserRole, IntRange
-
-from .errors import (
-    NoCredentials,
-    InvalidCredentials,
-    APIError,
-    OutOfRequests,
-)
+from .api import ChannelUserRole, CleverbotAPI, IntRange
+from .errors import APIError, InvalidCredentials, NoCredentials, OutOfRequests
 
 log = logging.getLogger("red.trusty-cogs.Cleverbot")
 
@@ -32,7 +23,7 @@ class Cleverbot(CleverbotAPI, commands.Cog):
     """
 
     __author__ = ["Twentysix", "TrustyJAID"]
-    __version__ = "2.3.2"
+    __version__ = "2.3.3"
 
     def __init__(self, bot):
         self.bot = bot
@@ -139,7 +130,9 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         """
         if len(channel_user_role) < 1:
             return await ctx.send(
-                _("You must supply 1 or more channels users or roles to be whitelisted.")
+                _(
+                    "You must supply 1 or more channels users or roles to be removed from the whitelist."
+                )
             )
         async with self.config.guild(ctx.guild).whitelist() as whitelist:
             for obj in channel_user_role:
@@ -184,7 +177,7 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         """
         if len(channel_user_role) < 1:
             return await ctx.send(
-                _("You must supply 1 or more channels users or roles to be whitelisted.")
+                _("You must supply 1 or more channels users or roles to be blacklisted.")
             )
         async with self.config.guild(ctx.guild).blacklist() as blacklist:
             for obj in channel_user_role:
@@ -208,7 +201,9 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         """
         if len(channel_user_role) < 1:
             return await ctx.send(
-                _("You must supply 1 or more channels users or roles to be whitelisted.")
+                _(
+                    "You must supply 1 or more channels users or roles to remove from the blacklist."
+                )
             )
         async with self.config.guild(ctx.guild).blacklist() as blacklist:
             for obj in channel_user_role:

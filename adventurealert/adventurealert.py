@@ -1,20 +1,19 @@
-import discord
-
 from abc import ABC
 from typing import Literal
+
+import discord
 from redbot import VersionInfo, version_info
-from redbot.core import commands, checks, Config
+from redbot.core import Config, checks, commands
 from redbot.core.i18n import Translator, cog_i18n
-from redbot.core.utils.chat_formatting import pagify, humanize_list
+from redbot.core.utils.chat_formatting import humanize_list, pagify
 
-from .bossalert import BossAlert
-from .minibossalert import MinibossAlert
-from .cartalert import CartAlert
 from .ascendedalert import AscendedAlert
-from .transcendedalert import TranscendedAlert
+from .bossalert import BossAlert
+from .cartalert import CartAlert
 from .immortalalert import ImmortalAlert
+from .minibossalert import MinibossAlert
 from .possessedalert import PossessedAlert
-
+from .transcendedalert import TranscendedAlert
 
 _ = Translator("AdventureAlert", __file__)
 
@@ -45,7 +44,7 @@ class AdventureAlert(
 ):
     """Alert when a dragon appears in adventure"""
 
-    __version__ = "1.4.2"
+    __version__ = "1.4.3"
     __author__ = ["TrustyJAID"]
 
     def __init__(self, bot):
@@ -91,12 +90,6 @@ class AdventureAlert(
         pre_processed = super().format_help_for_context(ctx)
         return f"{pre_processed}\n\nCog Version: {self.__version__}"
 
-    async def red_delete_data_for_user(self, **kwargs):
-        """
-        Nothing to delete
-        """
-        return
-
     async def red_delete_data_for_user(
         self,
         *,
@@ -139,6 +132,13 @@ class AdventureAlert(
         """Remove all adventurealert settings in all guilds"""
         await self.red_delete_data_for_user(requester="user", user_id=ctx.author.id)
         await ctx.send(_("Your Adventure Alerts have all been removed."))
+
+    @adventurealert.command()
+    @commands.is_owner()
+    async def removealluser(self, ctx: commands.Context, user_id: int) -> None:
+        """Remove A specified user from adventurealert across the bot"""
+        await self.red_delete_data_for_user(requester="owner", user_id=user_id)
+        await ctx.send(_("Adventure Alerts have all been removed for that user."))
 
     @adventurealert.command(name="settings", aliases=["setting"])
     async def alert_settings(self, ctx: commands.Context):

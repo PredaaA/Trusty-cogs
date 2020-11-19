@@ -1,22 +1,21 @@
-import discord
-import aiohttp
 import asyncio
-import logging
 import json
+import logging
 from base64 import b64encode
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
 
-
-from redbot.core import commands, Config, checks, VersionInfo, version_info
+import aiohttp
+import discord
+from redbot.core import Config, VersionInfo, checks, commands, version_info
 from redbot.core.bot import Red
-from redbot.core.i18n import Translator, cog_i18n, get_locale
 from redbot.core.data_manager import cog_data_path
+from redbot.core.i18n import Translator, cog_i18n, get_locale
 from redbot.core.utils.predicates import MessagePredicate
 
 from .errors import (
-    Destiny2APIError,
     Destiny2APICooldown,
+    Destiny2APIError,
     Destiny2InvalidParameters,
     Destiny2MissingAPITokens,
     Destiny2MissingManifest,
@@ -464,13 +463,15 @@ class DestinyAPI:
             count += 1
         try:
             await ctx.author.send(msg)
+            pred = MessagePredicate.valid_int(user=ctx.author)
         except discord.errors.Forbidden:
             await ctx.send(msg)
-        try:
             pred = MessagePredicate.valid_int(ctx)
+        try:
             msg = await ctx.bot.wait_for("message", check=pred, timeout=60)
         except asyncio.TimeoutError:
             return None, None
+        log.debug(memberships)
         membership = memberships[int(pred.result) - 1]
         membership_name = BUNGIE_MEMBERSHIP_TYPES[membership["membershipType"]]
         return (membership, membership_name)
