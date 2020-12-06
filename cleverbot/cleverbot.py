@@ -378,12 +378,10 @@ class Cleverbot(CleverbotAPI, commands.Cog):
             await ctx.message.delete()
 
     async def check_vote(self, user: int):
-        cog = self.bot.get_cog("DblTools")
-        if not cog:
+        if (cog := self.bot.get_cog("DblTools")) is None:
             return None
-        if await cog.config.user_from_id(user).voted():
-            return True
-        return False
+
+        return await cog.check_vote(user)
 
     async def send_cleverbot_response(
         self, message: str, author: Union[discord.Member, discord.User], ctx: commands.Context
